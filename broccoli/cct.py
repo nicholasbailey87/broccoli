@@ -60,7 +60,7 @@ class CCTEncoder(nn.Module):
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
-        transformer_bos_tokens=1,
+        transformer_bos_tokens=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
         mlp_dropout=0.0,
@@ -77,12 +77,13 @@ class CCTEncoder(nn.Module):
             print("Pooling type must be maxpool or concat")
             assert pooling_type in ["maxpool", "concat"]
 
+        super().__init__()
+
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
         else:
             self.activation = activation()
 
-        super().__init__()
         self.image_size = image_size
         output_size = (
             (image_size + 2 * pooling_kernel_padding - pooling_kernel_size)
@@ -201,7 +202,7 @@ class CCT(nn.Module):
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
-        transformer_bos_tokens=1,
+        transformer_bos_tokens=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
         mlp_dropout=0.0,  # The original paper got best performance from mlp_dropout=0.

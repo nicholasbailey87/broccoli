@@ -190,20 +190,20 @@ class TransformerEncoder(nn.Module):
         stochastic_depth=0.0,
         causal=False,
         linear_module=nn.Linear,
-        bos_tokens=True,
+        bos_tokens=0,
     ):
         super().__init__()
         self.seq_len = seq_len
         self.n_heads = n_heads
+        self._bos_tokens = bos_tokens
 
-        # Initialise BOS tokens with Xavier uniform init per
-        # https://docs.pytorch.org/docs/stable/nn.init.html#torch.nn.init.xavier_uniform_
-        if bos_tokens:
-            self.bos_tokens = nn.Parameter(torch.empty(bos_tokens, d_model))
-            nn.init.normal_(self.bos_tokens, mean=0.0, std=1.0)
-            self.full_sequence_length = self.seq_len + bos_tokens
+        # Initialise BOS tokens with normal init, like usual Pytorch embeddings
+        if self._bos_tokens:
+            self._bos = nn.Parameter(torch.empty(self._bos_tokens, d_model))
+            nn.init.normal_(self._bos, mean=0.0, std=1.0)
+            self.full_sequence_length = self.seq_len + self._bos_tokens
         else:
-            self.bos_tokens = None
+            self._bos = None
             self.full_sequence_length = self.seq_len
 
         self.d_model = d_model
@@ -229,8 +229,8 @@ class TransformerEncoder(nn.Module):
         )
 
     def forward(self, x):
-        if self.bos_tokens is not None:
-            x = torch.cat([self.bos_tokens.expand(x.size(0), -1, -1), x], dim=1)
+        if self._bos_tokens:
+            x = torch.cat([self._bos.expand(x.size(0), -1, -1), x], dim=1)
         else:
             x = x
         x = x + self.positional_embedding(
@@ -254,7 +254,7 @@ class TransformerEncoder(nn.Module):
                     unshuffle_indices, :, :
                 ].contiguous()
 
-        if self.bos_tokens is not None:
-            return x[:, (self.full_sequence_length - self.seq_len) :, :]
+        if self._bos_tokens:
+            return x[:, self._bos_tokens :, :]
         else:
             return x
