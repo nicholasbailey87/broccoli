@@ -1,7 +1,7 @@
 from typing import Optional
 
 from .transformer import TransformerEncoder
-from .cnn import ConvLayer, ConcatPool, WhiteningConv
+from .cnn import ConvLayer, ConcatPool
 from einops import einsum
 from einops.layers.torch import Rearrange
 import torch.nn as nn
@@ -78,6 +78,7 @@ class CCTEncoder(nn.Module):
             self.activation = activation()
 
         self.image_size = image_size
+
         output_size = (
             (image_size + 2 * conv_pooling_kernel_padding - conv_pooling_kernel_size)
             / conv_pooling_kernel_stride
