@@ -50,11 +50,10 @@ class CCTEncoder(nn.Module):
         self,
         image_size=32,
         conv_kernel_size=3,  # Only 2 is supported for eigenvector initialisation
-        whitening=False,
-        pooling_type="maxpool",
-        pooling_kernel_size=3,
-        pooling_kernel_stride=2,
-        pooling_kernel_padding=1,
+        conv_pooling_type="maxpool",
+        conv_pooling_kernel_size=3,
+        conv_pooling_kernel_stride=2,
+        conv_pooling_kernel_padding=1,
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
@@ -68,13 +67,8 @@ class CCTEncoder(nn.Module):
         linear_module=nn.Linear,
         image_channels=3,
     ):
-        # TODO: turn these into proper exceptions
-        if whitening and (conv_kernel_size != 2):
-            print("We currently only support whitening for kernel size 2!")
-            assert not (whitening and (conv_kernel_size != 2))
-        if pooling_type not in ["maxpool", "concat"]:
-            print("Pooling type must be maxpool or concat")
-            assert pooling_type in ["maxpool", "concat"]
+        if conv_pooling_type not in ["maxpool", "concat"]:
+            raise NotImplementedError("Pooling type must be maxpool or concat")
 
         super().__init__()
 
@@ -85,13 +79,13 @@ class CCTEncoder(nn.Module):
 
         self.image_size = image_size
         output_size = (
-            (image_size + 2 * pooling_kernel_padding - pooling_kernel_size)
-            / pooling_kernel_stride
+            (image_size + 2 * conv_pooling_kernel_padding - conv_pooling_kernel_size)
+            / conv_pooling_kernel_stride
         ) + 1
 
         self.sequence_length = int(output_size) ** 2
 
-        if pooling_type == "maxpool":
+        if conv_pooling_type == "maxpool":
 
             conv_out_channels = transformer_embedding_size
 
@@ -103,24 +97,24 @@ class CCTEncoder(nn.Module):
                     self.activation,
                     Rearrange("N H W C -> N C H W"),
                     nn.MaxPool2d(
-                        pooling_kernel_size,
-                        stride=pooling_kernel_stride,
-                        padding=pooling_kernel_padding,
+                        conv_pooling_kernel_size,
+                        stride=conv_pooling_kernel_stride,
+                        padding=conv_pooling_kernel_padding,
                     ),
                     Rearrange("N C H W -> N (H W) C"),
                 ]
             )
-        elif pooling_type == "concat":
+        elif conv_pooling_type == "concat":
 
             conv_out_channels = int(
-                round(transformer_embedding_size / (pooling_kernel_size**2))
+                round(transformer_embedding_size / (conv_pooling_kernel_size**2))
             )
 
             self.pool = ConcatPool(
                 conv_out_channels,
-                pooling_kernel_size,
-                pooling_kernel_stride,
-                pooling_kernel_padding,
+                conv_pooling_kernel_size,
+                conv_pooling_kernel_stride,
+                conv_pooling_kernel_padding,
                 transformer_embedding_size,
                 activation,
                 activation_kwargs,
@@ -150,29 +144,14 @@ class CCTEncoder(nn.Module):
         if activation.__name__.endswith("GLU"):
             conv_out_channels *= 2
 
-        if whitening:
-            whitening_conv_out_channels = conv_kernel_size**2 * image_channels * 2
-            self.conv = nn.Sequential(
-                *[
-                    WhiteningConv(
-                        in_channels=image_channels,
-                        kernel_size=conv_kernel_size,
-                        linear_module=linear_module,
-                    ),
-                    Rearrange("N C H W -> N H W C"),
-                    nn.Linear(whitening_conv_out_channels, conv_out_channels),
-                    Rearrange("N H W C -> N C H W"),
-                ]
-            )
-        else:
-            self.conv = ConvLayer(
-                image_channels,
-                conv_out_channels,
-                kernel_size=conv_kernel_size,
-                stride=1,
-                padding="same",
-                linear_module=linear_module,
-            )
+        self.conv = ConvLayer(
+            image_channels,
+            conv_out_channels,
+            kernel_size=conv_kernel_size,
+            stride=1,
+            padding="same",
+            linear_module=linear_module,
+        )
 
         self.encoder = nn.Sequential(*[self.conv, self.pool, self.transformer])
 
@@ -192,7 +171,6 @@ class CCT(nn.Module):
         self,
         image_size=32,
         conv_kernel_size=3,  # Only 2 is supported for eigenvector initialisation
-        whitening=False,
         pooling_type="maxpool",
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
@@ -212,14 +190,11 @@ class CCT(nn.Module):
         image_channels=3,
     ):
 
-        assert not (whitening and (conv_kernel_size != 2))
-
         super().__init__()
 
         self.encoder = CCTEncoder(
             image_size,
             conv_kernel_size,
-            whitening,
             pooling_type,
             pooling_kernel_size,
             pooling_kernel_stride,
