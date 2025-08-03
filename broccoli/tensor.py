@@ -7,7 +7,6 @@ class SigmaReparamTensor(nn.Module):
     """
     Inspired by Apple's Spectral Normed Linear Layers
         (https://github.com/apple/ml-sigma-reparam)
-
     """
 
     def __init__(self, init_tensor: torch.Tensor):

@@ -5,10 +5,8 @@ from numpy import random
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from einops import rearrange, einsum, reduce, repeat
-from einops.layers.torch import Rearrange
+from einops import rearrange
 
 
 class MHAttention(nn.Module):

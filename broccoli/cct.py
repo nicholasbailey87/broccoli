@@ -1,11 +1,10 @@
 from typing import Optional
 
 from .transformer import TransformerEncoder
-from cnn import ConvLayer, ConcatPool, WhiteningConv
-from einops import einsum, rearrange
+from .cnn import ConvLayer, ConcatPool, WhiteningConv
+from einops import einsum
 from einops.layers.torch import Rearrange
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class SequencePool(nn.Module):
