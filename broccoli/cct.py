@@ -1,6 +1,6 @@
 from typing import Optional
 
-from transformer import TransformerEncoder
+from .transformer import TransformerEncoder
 from cnn import ConvLayer, ConcatPool, WhiteningConv
 from einops import einsum, rearrange
 from einops.layers.torch import Rearrange
