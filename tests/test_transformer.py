@@ -38,7 +38,10 @@ def test_non_causal_attention_matches_pytorch(dummy_tensors):
     custom_mha = MHAttention(
         embed_dim=EMBED_DIM,
         n_heads=N_HEADS,
-        share_kv=False,  # Must be False to match PyTorch's separate k,v projections
+        share_kv=False,
+        max_subtract=False,
+        log_length_scale=False,
+        quiet=False,
     )
 
     # 3. Copy weights from PyTorch MHA to custom MHA for a fair comparison
@@ -77,6 +80,9 @@ def test_causal_attention_matches_pytorch(dummy_tensors):
         causal=True,
         sequence_length=SEQ_LEN,
         share_kv=False,
+        max_subtract=False,
+        log_length_scale=False,
+        quiet=False,
     )
 
     # 3. Copy weights for a direct comparison
@@ -100,6 +106,7 @@ def test_causal_attention_matches_pytorch(dummy_tensors):
 
     # 5. Assert that the outputs are numerically close
     assert output_pytorch.shape == output_custom.shape
+    # print(zip(output_pytorch, output_custom))
     assert torch.allclose(output_pytorch, output_custom, atol=ATOL)
 
 

@@ -11,39 +11,82 @@ from einops import rearrange
 
 class MHAttention(nn.Module):
     """
-    Multi-head self-attention using einops and custom linear layer.
+    Multi-head self-attention using einops and optionally a custom linear layer.
 
     Forward method assumes q, k and v have the same embedding size and k and v
         are the same shape.
 
     Assumes bias=False and batch_first=True, as God intended.
+
+    Optionally adds various bells and whistles suggested in the
+        literature, including:
+
+        Noam Shazeer's scaled attention per "Attention is All You Need"
+            (https://arxiv.org/abs/1706.03762).
+
+        Max subtract softmax as discussed in "Attention As An RNN"
+            (https://arxiv.org/abs/2405.13956)
+
+        Log-length scaled softmax per "Overcoming a Theoretical Limitation of
+            Self-Attention" (https://arxiv.org/abs/2202.12172).
+
+        Quiet softmax per
+            https://www.evanmiller.org/attention-is-off-by-one.html
+
+    Args:
+        embed_dim: ...
+        n_heads: ...
+        dropout: ...
+        causal: should a causal mask be applied to the logits before attention
+            is applied? This is standard when using self-attention. Cannot be
+            True if inputs won't be square (e.g. if sequence length for
+            encoder and decoder are different)
+        sequence_length: ...
+        share_kv: ...
+        linear_module: ...
+        max_subtract: if True, the maximum logit value is subtracted from all
+            logits before performing the softmax operation to create a more
+            numerically stable softmax. This is discussed in "Attention As An
+            RNN" (https://arxiv.org/abs/2405.13956).
+        d_model_scale: ...
+        log_length_scale: if True, multiplies logits by the log length of
+            the decoder sequence before performing the softmax operation, as
+            proposed in "Overcoming a Theoretical Limitation of Self-Attention"
+            (https://arxiv.org/abs/2202.12172).
+        quiet: if True, adds 1 to the denominator of the softmax operation,
+            allowing some tokens to attend to no other tokens as described in
+            https://www.evanmiller.org/attention-is-off-by-one.html.
     """
 
     def __init__(
         self,
-        embed_dim,
+        d_model,
         n_heads,
         dropout=0.0,
         causal=False,
         sequence_length=None,
         share_kv=True,
         linear_module: nn.Module = nn.Linear,
+        max_subtract=True,
+        d_model_scale=True,
+        log_length_scale=True,
+        quiet=True,
     ):
         super().__init__()
         if causal:
             assert sequence_length is not None
-        self.embed_dim = embed_dim
+        self.d_model = d_model
         self.n_heads = n_heads
-        assert embed_dim % n_heads == 0
+        assert d_model % n_heads == 0
         self.head_dim = self.embed_dim // self.n_heads
         self.share_kv = share_kv
-        self.q_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
-        self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+        self.q_proj = linear_module(self.d_model, self.d_model, bias=False)
+        self.k_proj = linear_module(self.d_model, self.d_model, bias=False)
         if self.share_kv:
             self.v_proj = self.k_proj
         else:
-            self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
-        self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+            self.v_proj = linear_module(self.d_model, self.d_model, bias=False)
+        self.out_proj = linear_module(self.d_model, self.d_model, bias=False)
         self.causal = causal
         self.sequence_length = sequence_length
         self.dropout = nn.Dropout(dropout)
@@ -57,6 +100,10 @@ class MHAttention(nn.Module):
                 .unsqueeze(0)
                 .unsqueeze(0),
             )
+        self.max_subtract = max_subtract
+        self.d_model_scale = d_model_scale
+        self.log_length_scale = log_length_scale
+        self.quiet = quiet
 
     def forward(self, q, k, v):
         query_batch_size, query_tokens, query_features = q.size()
@@ -82,14 +129,27 @@ class MHAttention(nn.Module):
             v = rearrange(self.v_proj(v), "b t (h d) -> b h t d", h=self.n_heads)
 
         qk_scores = q @ k.transpose(-1, -2)
-        qk_scores /= math.sqrt(self.head_dim)  # scaling
+
+        if self.max_subtract:
+            max_scores, _ = torch.max(qk_scores, dim=-1, keepdim=True)
+            qk_scores -= max_scores
+
+        if self.d_model_scale:
+            qk_scores /= math.sqrt(self.head_dim)  # scaling
+
+        if self.log_length_scale:
+            qk_scores *= math.log(qk_scores.size(0))
 
         # Apply mask if causal (must come before softmax)
         if self.causal:
             qk_scores.masked_fill_(self.mask, float("-inf"))
 
-        qk_scores = torch.softmax(qk_scores, dim=-1)  # softmax
-        qk_scores = self.dropout(qk_scores)  # dropout must come after softmax!
+        # Apply softmax and dropout
+        denominator = torch.sum(torch.exp(qk_scores), dim=-1, keepdim=True)
+        if self.quiet:
+            denominator += 1
+        numerator = torch.exp(qk_scores)
+        qk_scores = self.dropout(numerator / denominator)
 
         output_with_heads = qk_scores @ v
 
@@ -117,6 +177,11 @@ class TransformerBlock(nn.Module):
         mlp_dropout=0.0,
         msa_dropout=0.0,
         causal=False,
+        share_kv=True,
+        max_subtract=True,
+        d_model_scale=True,
+        log_length_scale=True,
+        quiet_attention=True,
         linear_module=nn.Linear,
     ):
         super().__init__()
@@ -128,11 +193,17 @@ class TransformerBlock(nn.Module):
 
         # Submodules for applying attention
         self.layer_norm = nn.LayerNorm(d_model)
+
         self.attn = MHAttention(  # Handles QKV projection
             d_model,
             n_heads,
             dropout=msa_dropout,
             causal=causal,
+            share_kv=share_kv,
+            max_subtract=max_subtract,
+            d_model_scale=d_model_scale,
+            log_length_scale=log_length_scale,
+            quiet=quiet_attention,
             linear_module=linear_module,
         )
 
@@ -187,6 +258,11 @@ class TransformerEncoder(nn.Module):
         msa_dropout=0.0,
         stochastic_depth=0.0,
         causal=False,
+        share_kv=True,
+        max_subtract=True,
+        d_model_scale=True,
+        log_length_scale=True,
+        quiet_attention=True,
         linear_module=nn.Linear,
         bos_tokens=0,
     ):
@@ -220,6 +296,11 @@ class TransformerEncoder(nn.Module):
                     mlp_dropout=mlp_dropout,
                     msa_dropout=msa_dropout,
                     causal=causal,
+                    share_kv=share_kv,
+                    max_subtract=max_subtract,
+                    d_model_scale=d_model_scale,
+                    log_length_scale=log_length_scale,
+                    quiet_attention=quiet_attention,
                     linear_module=linear_module,
                 )
                 for _ in range(n_layers)
