@@ -6,7 +6,7 @@ import torch.nn as nn
 from broccoli.transformer import MHAttention
 
 # Constants for testing
-EMBED_DIM = 12
+D_MODEL = 12
 N_HEADS = 4
 SEQ_LEN = 10
 BATCH_SIZE = 2
@@ -16,9 +16,9 @@ ATOL = 1e-6  # Absolute tolerance for tensor comparisons
 @pytest.fixture
 def dummy_tensors():
     """Provides a standard set of tensors for attention tests."""
-    query = torch.randn(BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-    key = torch.randn(BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-    value = torch.randn(BATCH_SIZE, SEQ_LEN, EMBED_DIM)
+    query = torch.randn(BATCH_SIZE, SEQ_LEN, D_MODEL)
+    key = torch.randn(BATCH_SIZE, SEQ_LEN, D_MODEL)
+    value = torch.randn(BATCH_SIZE, SEQ_LEN, D_MODEL)
     return query, key, value
 
 
@@ -31,12 +31,12 @@ def test_non_causal_attention_matches_pytorch(dummy_tensors):
 
     # 1. Instantiate PyTorch's implementation
     pytorch_mha = nn.MultiheadAttention(
-        embed_dim=EMBED_DIM, num_heads=N_HEADS, bias=False, batch_first=True
+        embed_dim=D_MODEL, num_heads=N_HEADS, bias=False, batch_first=True
     )
 
     # 2. Instantiate our custom implementation
     custom_mha = MHAttention(
-        embed_dim=EMBED_DIM,
+        embed_dim=D_MODEL,
         n_heads=N_HEADS,
         share_kv=False,
         max_subtract=False,
@@ -70,12 +70,12 @@ def test_causal_attention_matches_pytorch(dummy_tensors):
 
     # 1. Instantiate PyTorch's implementation
     pytorch_mha = nn.MultiheadAttention(
-        embed_dim=EMBED_DIM, num_heads=N_HEADS, bias=False, batch_first=True
+        embed_dim=D_MODEL, num_heads=N_HEADS, bias=False, batch_first=True
     )
 
     # 2. Instantiate our custom implementation for causal attention
     custom_mha = MHAttention(
-        embed_dim=EMBED_DIM,
+        embed_dim=D_MODEL,
         n_heads=N_HEADS,
         causal=True,
         sequence_length=SEQ_LEN,
@@ -112,7 +112,7 @@ def test_causal_attention_matches_pytorch(dummy_tensors):
 
 def test_shared_kv_projection():
     """Checks that k_proj and v_proj are the same module when share_kv is True."""
-    mha = MHAttention(EMBED_DIM, N_HEADS, share_kv=True)
+    mha = MHAttention(D_MODEL, N_HEADS, share_kv=True)
     # Check if they are the exact same object in memory
     assert mha.k_proj is mha.v_proj
 
@@ -122,7 +122,7 @@ def test_dropout_is_active(dummy_tensors):
     query, key, value = dummy_tensors
 
     mha_with_dropout = MHAttention(
-        embed_dim=EMBED_DIM,
+        embed_dim=D_MODEL,
         n_heads=N_HEADS,
         dropout=0.5,  # Use a high dropout rate to ensure outputs differ
     )
@@ -146,7 +146,7 @@ def test_causal_assertion_error():
     """Ensures that creating a causal model without a sequence_length raises an error."""
     with pytest.raises(AssertionError):
         MHAttention(
-            embed_dim=EMBED_DIM,
+            embed_dim=D_MODEL,
             n_heads=N_HEADS,
             causal=True,
             sequence_length=None,  # This should trigger the assertion

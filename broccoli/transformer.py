@@ -5,6 +5,7 @@ from numpy import random
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from einops import rearrange
 
@@ -34,7 +35,7 @@ class MHAttention(nn.Module):
             https://www.evanmiller.org/attention-is-off-by-one.html
 
     Args:
-        embed_dim: ...
+        d_model: ...
         n_heads: ...
         dropout: ...
         causal: should a causal mask be applied to the logits before attention
@@ -60,33 +61,33 @@ class MHAttention(nn.Module):
 
     def __init__(
         self,
-        d_model,
+        embed_dim,
         n_heads,
         dropout=0.0,
         causal=False,
         sequence_length=None,
-        share_kv=True,
+        share_kv=False,
         linear_module: nn.Module = nn.Linear,
-        max_subtract=True,
+        max_subtract=False,
         d_model_scale=True,
-        log_length_scale=True,
-        quiet=True,
+        log_length_scale=False,
+        quiet=False,
     ):
         super().__init__()
         if causal:
             assert sequence_length is not None
-        self.d_model = d_model
+        self.embed_dim = embed_dim
         self.n_heads = n_heads
-        assert d_model % n_heads == 0
+        assert embed_dim % n_heads == 0
         self.head_dim = self.embed_dim // self.n_heads
         self.share_kv = share_kv
-        self.q_proj = linear_module(self.d_model, self.d_model, bias=False)
-        self.k_proj = linear_module(self.d_model, self.d_model, bias=False)
+        self.q_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+        self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         if self.share_kv:
             self.v_proj = self.k_proj
         else:
-            self.v_proj = linear_module(self.d_model, self.d_model, bias=False)
-        self.out_proj = linear_module(self.d_model, self.d_model, bias=False)
+            self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+        self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.causal = causal
         self.sequence_length = sequence_length
         self.dropout = nn.Dropout(dropout)
@@ -104,6 +105,25 @@ class MHAttention(nn.Module):
         self.d_model_scale = d_model_scale
         self.log_length_scale = log_length_scale
         self.quiet = quiet
+
+    @property
+    def _kv_distance(self) -> float:
+        """
+        Calculates the cosine distance between the weight tensors of `self.k_proj`
+            and `self.v_proj`.
+
+        The cosine distance is defined as 1 - cosine_similarity (i.e. a value
+            closer to 0 indicates higher similarity.
+        """
+
+        similarity = F.cosine_similarity(
+            self.k_proj.weight.detach().flatten(),
+            self.v_proj.weight.detach().flatten(),
+            dim=0,
+            eps=1e-8,
+        ).item()
+
+        return 1 - similarity
 
     def forward(self, q, k, v):
         query_batch_size, query_tokens, query_features = q.size()
@@ -131,7 +151,7 @@ class MHAttention(nn.Module):
         qk_scores = q @ k.transpose(-1, -2)
 
         if self.max_subtract:
-            max_scores, _ = torch.max(qk_scores, dim=-1, keepdim=True)
+            max_scores, _ = torch.max(qk_scores, keepdim=True)
             qk_scores -= max_scores
 
         if self.d_model_scale:
@@ -177,11 +197,11 @@ class TransformerBlock(nn.Module):
         mlp_dropout=0.0,
         msa_dropout=0.0,
         causal=False,
-        share_kv=True,
-        max_subtract=True,
+        share_kv=False,
+        max_subtract=False,
         d_model_scale=True,
-        log_length_scale=True,
-        quiet_attention=True,
+        log_length_scale=False,
+        quiet_attention=False,
         linear_module=nn.Linear,
     ):
         super().__init__()
@@ -232,6 +252,10 @@ class TransformerBlock(nn.Module):
             )
         )
 
+    @property
+    def _kv_distance(self) -> float:
+        return self.attn._kv_distance
+
     def forward(self, x):
         normx = self.layer_norm(x)
         x = x + self.attn(normx, normx, normx)
@@ -258,11 +282,11 @@ class TransformerEncoder(nn.Module):
         msa_dropout=0.0,
         stochastic_depth=0.0,
         causal=False,
-        share_kv=True,
-        max_subtract=True,
+        share_kv=False,
+        max_subtract=False,
         d_model_scale=True,
-        log_length_scale=True,
-        quiet_attention=True,
+        log_length_scale=False,
+        quiet_attention=False,
         linear_module=nn.Linear,
         bos_tokens=0,
     ):
@@ -306,6 +330,10 @@ class TransformerEncoder(nn.Module):
                 for _ in range(n_layers)
             ]
         )
+
+    @property
+    def _kv_distances(self) -> float:
+        return ",".join([block._kv_distance for block in self.blocks])
 
     def forward(self, x):
         if self._bos_tokens:

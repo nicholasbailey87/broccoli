@@ -13,7 +13,8 @@ OUT_CHANNELS = 8
 BATCH_SIZE = 4
 INPUT_H = 28
 INPUT_W = 28
-ATOL = 1e-4  # Absolute tolerance for float comparisons
+# XXX: refine ATOL value below, add RTOL, and give reasoning for both in comment
+ATOL = 1e-4
 
 
 @pytest.fixture
