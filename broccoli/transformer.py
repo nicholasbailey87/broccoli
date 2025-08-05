@@ -333,7 +333,7 @@ class TransformerEncoder(nn.Module):
 
     @property
     def _kv_distances(self) -> float:
-        return ",".join([block._kv_distance for block in self.blocks])
+        return ",".join([str(block._kv_distance) for block in self.blocks])
 
     def forward(self, x):
         if self._bos_tokens:
