@@ -307,8 +307,8 @@ class ConcatPool(nn.Module):
         pooling_kernel_stride: int,
         pooling_kernel_padding: int,
         d_model: int,
-        activation_kwargs: Optional[dict] = None,
         activation: nn.Module = nn.ReLU,
+        activation_kwargs: Optional[dict] = None,
         linear_module: Type[nn.Module] = nn.Linear,
     ):
         super().__init__()
@@ -335,64 +335,6 @@ class ConcatPool(nn.Module):
                     2 * d_model if activation.__name__.endswith("GLU") else d_model,
                 ),
                 self.activation,
-            ]
-        )
-
-    def forward(self, x):
-        return self.process(x)
-
-
-class WhitenConcatProject(nn.Module):
-    """
-    A layer that whitens patches of the input image, then concatenates nearby
-        patch embeddings before rearranging the outputs into the format expected
-        by a Transformer block
-    """
-
-    def __init__(
-        self,
-        in_channels: int,
-        convolution_kernel_size: int,
-        pooling_kernel_size: int,
-        pooling_kernel_stride: int,
-        pooling_kernel_padding: int,
-        d_model: int,
-        dropout=0.0,
-        activation: nn.Module = nn.ReLU,
-        activation_kwargs: Optional[dict] = None,
-        eigenvectors: torch.Tensor = None,
-        bias: bool = True,
-        linear_module: Type[nn.Module] = nn.Linear,
-    ):
-        super().__init__()
-        assert eigenvectors is not None
-        self.in_channels = in_channels
-        self.convolution_kernel_size = convolution_kernel_size
-        self.pooling_kernel_size = pooling_kernel_size
-        self.whitening_out_channels = convolution_kernel_size**2 * in_channels * 2
-        self.pooling_output_size = (
-            pooling_kernel_size**2
-        ) * self.whitening_out_channels
-        self.process = nn.Sequential(
-            *[
-                WhiteningConv(
-                    in_channels,
-                    convolution_kernel_size,
-                    eigenvectors,
-                    bias=bias,
-                    linear_module=linear_module,
-                ),
-                ConcatPool(
-                    self.whitening_out_channels,
-                    pooling_kernel_size,
-                    pooling_kernel_stride,
-                    pooling_kernel_padding,
-                    d_model,
-                    activation,
-                    activation_kwargs,
-                    linear_module,
-                ),
-                nn.Dropout(dropout),
             ]
         )
 
