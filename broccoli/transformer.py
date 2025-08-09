@@ -151,7 +151,7 @@ class MHAttention(nn.Module):
         qk_scores = q @ k.transpose(-1, -2)
 
         if self.max_subtract:
-            max_scores, _ = torch.max(qk_scores, keepdim=True)
+            max_scores, _ = torch.max(qk_scores, dim=-1, keepdim=True)
             qk_scores -= max_scores
 
         if self.d_model_scale:
