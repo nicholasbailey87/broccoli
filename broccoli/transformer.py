@@ -150,15 +150,15 @@ class MHAttention(nn.Module):
 
         qk_scores = q @ k.transpose(-1, -2)
 
-        if self.max_subtract:
-            max_scores, _ = torch.max(qk_scores, dim=-1, keepdim=True)
-            qk_scores -= max_scores
-
         if self.d_model_scale:
             qk_scores /= math.sqrt(self.head_dim)  # scaling
 
         if self.log_length_scale:
             qk_scores *= math.log(qk_scores.size(0))
+
+        if self.max_subtract:
+            max_scores, _ = torch.max(qk_scores, dim=-1, keepdim=True)
+            qk_scores -= max_scores
 
         # Apply mask if causal (must come before softmax)
         if self.causal:
