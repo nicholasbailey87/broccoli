@@ -177,7 +177,7 @@ class MHAttention(nn.Module):
             q = rearrange(q, "b height width d -> b (height width) d")
             k = rearrange(k, "b height width d -> b (height width) d")
 
-        # Project q, k and v and divide into heads
+        # Divide Q/K/V into heads
         q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
         k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
         v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)

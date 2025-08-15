@@ -86,9 +86,16 @@ class CCTEncoder(nn.Module):
         self.image_size = image_size
 
         output_size = (
-            (image_size + 2 * conv_pooling_kernel_padding - conv_pooling_kernel_size)
-            / conv_pooling_kernel_stride
-        ) + 1
+            int(
+                (
+                    image_size
+                    + 2 * conv_pooling_kernel_padding
+                    - conv_pooling_kernel_size
+                )
+                / conv_pooling_kernel_stride
+            )
+            + 1
+        )
 
         self.sequence_length = int(output_size) ** 2
 
