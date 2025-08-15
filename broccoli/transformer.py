@@ -406,8 +406,7 @@ class TransformerEncoder(nn.Module):
         else:
             x = x
 
-        if self.embedding_type == "absolute":
-            # I
+        if self.position_embedding_type == "absolute":
             x = x + self.positional_embedding(
                 torch.arange(
                     0, self.full_sequence_length, dtype=torch.long, device=x.device
