@@ -11,7 +11,7 @@ class SequencePool(nn.Module):
     """
     As described in [Hasani et al. (2021) *''Escaping the Big Data Paradigm with
         Compact Transformers''*](https://arxiv.org/abs/2104.05704). It can be viewed
-        as. ageneralisation of average pooling.
+        as a generalisation of average pooling.
     """
 
     def __init__(self, d_model, linear_module, out_dim):
@@ -54,6 +54,7 @@ class CCTEncoder(nn.Module):
         conv_pooling_kernel_size=3,
         conv_pooling_kernel_stride=2,
         conv_pooling_kernel_padding=1,
+        transformer_position_embedding="absolute",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
@@ -116,15 +117,21 @@ class CCTEncoder(nn.Module):
                 round(transformer_embedding_size / (conv_pooling_kernel_size**2))
             )
 
-            self.pool = ConcatPool(
-                conv_out_channels,
-                conv_pooling_kernel_size,
-                conv_pooling_kernel_stride,
-                conv_pooling_kernel_padding,
-                transformer_embedding_size,
-                activation,
-                activation_kwargs,
-                linear_module,
+            self.pool = nn.Sequential(
+                *[
+                    ConcatPool(
+                        output_size,
+                        conv_out_channels,
+                        conv_pooling_kernel_size,
+                        conv_pooling_kernel_stride,
+                        conv_pooling_kernel_padding,
+                        transformer_embedding_size,
+                        activation,
+                        activation_kwargs,
+                        linear_module,
+                    ),
+                    Rearrange("N C H W -> N (H W) C"),
+                ]
             )
 
         if transformer_layers > 0:
@@ -133,6 +140,8 @@ class CCTEncoder(nn.Module):
                 transformer_embedding_size,
                 transformer_layers,
                 transformer_heads,
+                position_embedding_type=transformer_position_embedding,
+                source_size=(output_size, output_size),
                 mlp_ratio=transformer_mlp_ratio,
                 activation=activation,
                 activation_kwargs=activation_kwargs,
@@ -186,6 +195,7 @@ class CCT(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_kernel_padding=1,
+        transformer_position_embedding="absolute",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
@@ -215,6 +225,7 @@ class CCT(nn.Module):
             conv_pooling_kernel_size=pooling_kernel_size,
             conv_pooling_kernel_stride=pooling_kernel_stride,
             conv_pooling_kernel_padding=pooling_kernel_padding,
+            transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
             transformer_heads=transformer_heads,

@@ -9,6 +9,8 @@ import torch.nn.functional as F
 
 from einops import rearrange
 
+from .rope import RotaryEmbedding, apply_rotary_emb
+
 
 class MHAttention(nn.Module):
     """
@@ -65,17 +67,23 @@ class MHAttention(nn.Module):
         n_heads,
         dropout=0.0,
         causal=False,
-        sequence_length=None,
+        seq_len=None,
         share_kv=False,
         linear_module: nn.Module = nn.Linear,
         max_subtract=False,
         d_model_scale=True,
         log_length_scale=False,
         quiet=False,
+        rotary_embedding=None,
+        source_size=None,
     ):
         super().__init__()
+
+        if rotary_embedding is not None:
+            assert source_size is not None
         if causal:
-            assert sequence_length is not None
+            assert seq_len is not None
+
         self.embed_dim = embed_dim
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
@@ -89,15 +97,12 @@ class MHAttention(nn.Module):
             self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.causal = causal
-        self.sequence_length = sequence_length
+        self.seq_len = seq_len
         self.dropout = nn.Dropout(dropout)
         if self.causal:
             self.register_buffer(
                 "mask",
-                (
-                    torch.triu(torch.ones(sequence_length, sequence_length), diagonal=1)
-                    == 1
-                )
+                (torch.triu(torch.ones(seq_len, seq_len), diagonal=1) == 1)
                 .unsqueeze(0)
                 .unsqueeze(0),
             )
@@ -105,6 +110,8 @@ class MHAttention(nn.Module):
         self.d_model_scale = d_model_scale
         self.log_length_scale = log_length_scale
         self.quiet = quiet
+        self.rotary_embedding = rotary_embedding
+        self.source_size = source_size
 
     @property
     def _kv_distance(self) -> float:
@@ -140,13 +147,40 @@ class MHAttention(nn.Module):
             assert query_tokens == key_tokens
             assert query_tokens == self.sequence_length
 
-        # Project q, k and v and divide into heads
-        q = rearrange(self.q_proj(q), "b t (h d) -> b h t d", h=self.n_heads)
-        k = rearrange(self.k_proj(k), "b t (h d) -> b h t d", h=self.n_heads)
+        # Project q, k and v
+        q = self.q_proj(q)
+        k = self.k_proj(k)
         if self.share_kv:
-            v = k
+            v = self.k_proj(v)
         else:
-            v = rearrange(self.v_proj(v), "b t (h d) -> b h t d", h=self.n_heads)
+            v = self.v_proj(v)
+
+        # Rearrange dimensions and add RoPE if needed
+        if self.rotary_embedding is not None:
+            q = rearrange(
+                q,
+                "b (height width) d -> b height width d",
+                height=self.source_size[0],
+                width=self.source_size[1],
+            )
+            k = rearrange(
+                k,
+                "b (height width) d -> b height width d",
+                height=self.source_size[0],
+                width=self.source_size[1],
+            )
+            freqs = self.rotary_embedding.get_axial_freqs(
+                self.source_size[0], self.source_size[1]
+            )
+            q = apply_rotary_emb(freqs, q)
+            k = apply_rotary_emb(freqs, k)
+            q = rearrange(q, "b height width d -> b (height width) d")
+            k = rearrange(k, "b height width d -> b (height width) d")
+
+        # Project q, k and v and divide into heads
+        q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
+        k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
+        v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
 
         qk_scores = q @ k.transpose(-1, -2)
 
@@ -189,8 +223,11 @@ class TransformerBlock(nn.Module):
 
     def __init__(
         self,
+        seq_len,
         d_model,
         n_heads,
+        position_embedding_type="absolute",  # absolute or relative
+        source_size=None,
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
@@ -214,17 +251,32 @@ class TransformerBlock(nn.Module):
         # Submodules for applying attention
         self.layer_norm = nn.LayerNorm(d_model)
 
+        if position_embedding_type == "relative":
+            max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
+            if d_model < 48:
+                dim = d_model
+            else:
+                dim = 16
+            self.rotary_embedding = RotaryEmbedding(
+                dim=dim, freqs_for="pixel", max_freq=max_freq
+            )
+        else:
+            self.rotary_embedding = None
+
         self.attn = MHAttention(  # Handles QKV projection
             d_model,
             n_heads,
             dropout=msa_dropout,
             causal=causal,
+            seq_len=seq_len,
             share_kv=share_kv,
             max_subtract=max_subtract,
             d_model_scale=d_model_scale,
             log_length_scale=log_length_scale,
             quiet=quiet_attention,
             linear_module=linear_module,
+            rotary_embedding=self.rotary_embedding,
+            source_size=source_size,
         )
 
         # Submodules for the feedforward process
@@ -275,6 +327,8 @@ class TransformerEncoder(nn.Module):
         d_model,
         n_layers,
         n_heads,
+        position_embedding_type="absolute",  # absolute or relative
+        source_size=None,
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
@@ -290,6 +344,9 @@ class TransformerEncoder(nn.Module):
         linear_module=nn.Linear,
         bos_tokens=0,
     ):
+        if position_embedding_type == "relative":
+            assert source_size is not None  # TODO: make this a proper exception
+
         super().__init__()
         self.seq_len = seq_len
         self.n_heads = n_heads
@@ -305,15 +362,23 @@ class TransformerEncoder(nn.Module):
             self.full_sequence_length = self.seq_len
 
         self.d_model = d_model
-        self.positional_embedding = nn.Embedding(self.full_sequence_length, d_model)
+
+        self.position_embedding_type = position_embedding_type
+
+        if self.position_embedding_type == "absolute":
+            self.positional_embedding = nn.Embedding(self.full_sequence_length, d_model)
+
         self.mlp_dropout = mlp_dropout
         self.msa_dropout = msa_dropout
         self.stochastic_depth = stochastic_depth
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
+                    seq_len,
                     d_model,
                     n_heads,
+                    position_embedding_type=position_embedding_type,
+                    source_size=source_size,
                     mlp_ratio=mlp_ratio,
                     activation=activation,
                     activation_kwargs=activation_kwargs,
@@ -340,13 +405,17 @@ class TransformerEncoder(nn.Module):
             x = torch.cat([self._bos.expand(x.size(0), -1, -1), x], dim=1)
         else:
             x = x
-        x = x + self.positional_embedding(
-            torch.arange(
-                0, self.full_sequence_length, dtype=torch.long, device=x.device
-            ).unsqueeze(
-                0
-            )  # to shape (1, seq_len) to broadcast over batch
-        )
+
+        if self.embedding_type == "absolute":
+            # I
+            x = x + self.positional_embedding(
+                torch.arange(
+                    0, self.full_sequence_length, dtype=torch.long, device=x.device
+                ).unsqueeze(
+                    0
+                )  # to shape (1, seq_len) to broadcast over batch
+            )
+
         for block in self.blocks:
             if (not self.training) or self.stochastic_depth == 0.0:
                 x = block(x)

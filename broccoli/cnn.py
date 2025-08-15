@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.utils import _pair
-from einops import rearrange, repeat
+from einops import rearrange
 import math
 from typing import Type, Union, Tuple, Optional, Literal
 
@@ -302,6 +302,7 @@ class ConcatPool(nn.Module):
 
     def __init__(
         self,
+        input_size,
         in_channels: int,
         pooling_kernel_size: int,
         pooling_kernel_stride: int,
@@ -335,6 +336,13 @@ class ConcatPool(nn.Module):
                     2 * d_model if activation.__name__.endswith("GLU") else d_model,
                 ),
                 self.activation,
+                Rearrange("N L Block -> N Block L"),
+                nn.Fold(
+                    output_size=(input_size, input_size),
+                    kernel_size=pooling_kernel_size,
+                    stride=pooling_kernel_stride,
+                    padding=pooling_kernel_padding,
+                ),
             ]
         )
 

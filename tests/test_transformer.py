@@ -78,7 +78,7 @@ def test_causal_attention_matches_pytorch(dummy_tensors):
         embed_dim=D_MODEL,
         n_heads=N_HEADS,
         causal=True,
-        sequence_length=SEQ_LEN,
+        seq_len=SEQ_LEN,
         share_kv=False,
         max_subtract=False,
         log_length_scale=False,
@@ -149,5 +149,5 @@ def test_causal_assertion_error():
             embed_dim=D_MODEL,
             n_heads=N_HEADS,
             causal=True,
-            sequence_length=None,  # This should trigger the assertion
+            seq_len=None,  # This should trigger the assertion
         )
