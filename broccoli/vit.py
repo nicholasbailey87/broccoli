@@ -173,7 +173,7 @@ class CCTEncoder(nn.Module):
                 ),
                 self.activation,
                 Rearrange("N H W C -> N C H W"),
-                self.pooling,
+                self.pool,
                 Rearrange("N C H W -> N (H W) C"),
                 self.transformer,
             ]
