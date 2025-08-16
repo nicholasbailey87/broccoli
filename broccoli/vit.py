@@ -85,7 +85,7 @@ class CCTEncoder(nn.Module):
 
         self.image_size = image_size
 
-        output_size = (
+        output_size = (  # Output of pooling
             int(
                 (
                     image_size
@@ -103,21 +103,12 @@ class CCTEncoder(nn.Module):
 
             conv_out_channels = transformer_embedding_size
 
-            self.pool = nn.Sequential(
-                *[
-                    Rearrange(
-                        "N C H W -> N H W C"
-                    ),  # rearrange in case we're using XGLU activation
-                    self.activation,
-                    Rearrange("N H W C -> N C H W"),
-                    nn.MaxPool2d(
-                        conv_pooling_kernel_size,
-                        stride=conv_pooling_kernel_stride,
-                        padding=conv_pooling_kernel_padding,
-                    ),
-                    Rearrange("N C H W -> N (H W) C"),
-                ]
+            self.pool = nn.MaxPool2d(
+                conv_pooling_kernel_size,
+                stride=conv_pooling_kernel_stride,
+                padding=conv_pooling_kernel_padding,
             )
+
         elif conv_pooling_type == "concat":
 
             conv_out_channels = int(
@@ -126,16 +117,10 @@ class CCTEncoder(nn.Module):
 
             self.pool = nn.Sequential(
                 *[
-                    ConcatPool(
-                        output_size,
-                        conv_out_channels,
-                        conv_pooling_kernel_size,
-                        conv_pooling_kernel_stride,
-                        conv_pooling_kernel_padding,
-                        transformer_embedding_size,
-                        activation,
-                        activation_kwargs,
-                        linear_module,
+                    Rearrange(
+                        "N C (H kh) (W kw) -> N (C kh kw) H W",
+                        kh=conv_pooling_kernel_size,
+                        kw=conv_pooling_kernel_size,
                     ),
                     Rearrange("N C H W -> N (H W) C"),
                 ]
@@ -180,7 +165,19 @@ class CCTEncoder(nn.Module):
             linear_module=linear_module,
         )
 
-        self.encoder = nn.Sequential(*[self.conv, self.pool, self.transformer])
+        self.encoder = nn.Sequential(
+            *[
+                self.conv,
+                Rearrange(  # rearrange in case we're using XGLU activation
+                    "N C H W -> N H W C"
+                ),
+                self.activation,
+                Rearrange("N H W C -> N C H W"),
+                self.pooling,
+                Rearrange("N C H W -> N (H W) C"),
+                self.transformer,
+            ]
+        )
 
     def forward(self, x):
         return self.encoder(x)
