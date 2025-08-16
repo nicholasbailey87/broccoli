@@ -115,8 +115,12 @@ class CCTEncoder(nn.Module):
                 round(transformer_embedding_size / (conv_pooling_kernel_size**2))
             )
 
+            # XXX: currently we are only suppporting square images
+            remainder = int(self.image_size % conv_pooling_kernel_size)
+
             self.pool = nn.Sequential(
                 *[
+                    nn.ZeroPad2d((0, remainder, 0, remainder)),
                     Rearrange(
                         "N C (H kh) (W kw) -> N (C kh kw) H W",
                         kh=conv_pooling_kernel_size,
