@@ -167,7 +167,7 @@ class ConvLayer(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (N, C_out, H_out, W_out).
         """
-        N, C, H, W = x.shape
+        _, C, H, W = x.shape
         if C != self.in_channels:
             raise ValueError(
                 f"Input channels {C} does not match expected {self.in_channels}"
@@ -297,54 +297,65 @@ class WhiteningConv(ConvLayer):
 
 class ConcatPool(nn.Module):
     """
-    A layer that concatenates nearby squares of an image
+    A "pooling" layer that extracts patches from an image-like tensor and stacks
+        them channel-wise.
     """
 
-    def __init__(
-        self,
-        input_size,
-        in_channels: int,
-        pooling_kernel_size: int,
-        pooling_kernel_stride: int,
-        pooling_kernel_padding: int,
-        d_model: int,
-        activation: nn.Module = nn.ReLU,
-        activation_kwargs: Optional[dict] = None,
-        linear_module: Type[nn.Module] = nn.Linear,
-    ):
+    def __init__(self, kernel_size, stride=1, padding=0, dilation=1):
         super().__init__()
-        self.in_channels = in_channels
-        self.pooling_kernel_size = pooling_kernel_size
-        self.pooling_kernel_stride = pooling_kernel_stride
-        self.pooling_kernel_padding = pooling_kernel_padding
-        self.d_model = d_model
-        self.pooling_output_size = (pooling_kernel_size**2) * self.in_channels
-        if activation_kwargs is not None:
-            self.activation = activation(**activation_kwargs)
-        else:
-            self.activation = activation()
-        self.process = nn.Sequential(
-            *[
-                nn.Unfold(
-                    pooling_kernel_size,
-                    stride=pooling_kernel_stride,
-                    padding=pooling_kernel_padding,
-                ),
-                Rearrange("N Block L -> N L Block"),
-                linear_module(
-                    self.pooling_output_size,
-                    2 * d_model if activation.__name__.endswith("GLU") else d_model,
-                ),
-                self.activation,
-                Rearrange("N L Block -> N Block L"),
-                nn.Fold(
-                    output_size=(input_size, input_size),
-                    kernel_size=pooling_kernel_size,
-                    stride=pooling_kernel_stride,
-                    padding=pooling_kernel_padding,
-                ),
-            ]
+
+        # Ensure kernel_size, stride, etc. are tuples
+        self.kernel_size = (
+            (kernel_size, kernel_size) if isinstance(kernel_size, int) else kernel_size
+        )
+        self.stride = (stride, stride) if isinstance(stride, int) else stride
+        self.padding = (padding, padding) if isinstance(padding, int) else padding
+        self.dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
+
+        # The core patch extraction layer
+        self.unfold = nn.Unfold(
+            kernel_size=self.kernel_size,
+            dilation=self.dilation,
+            padding=self.padding,
+            stride=self.stride,
         )
 
     def forward(self, x):
-        return self.process(x)
+        # Input shape: (N, C_in, H_in, W_in)
+        N, C_in, H_in, W_in = x.shape
+
+        # 1. Unfold the image to extract patches
+        # Output shape: (N, C_in * k * k, L)
+        # where L is the number of patches, L = H_out * W_out
+        patches = self.unfold(x)
+
+        # New channel dimension
+        C_out = C_in * self.kernel_size[0] * self.kernel_size[1]
+
+        # 2. Calculate the output spatial dimensions
+        H_out = math.floor(
+            (
+                H_in
+                + 2 * self.padding[0]
+                - self.dilation[0] * (self.kernel_size[0] - 1)
+                - 1
+            )
+            / self.stride[0]
+            + 1
+        )
+        W_out = math.floor(
+            (
+                W_in
+                + 2 * self.padding[1]
+                - self.dilation[1] * (self.kernel_size[1] - 1)
+                - 1
+            )
+            / self.stride[1]
+            + 1
+        )
+
+        # 3. Reshape to the final 4D tensor
+        # (N, C_in * k * k, L) -> (N, C_out, H_out, W_out)
+        out = patches.view(N, C_out, H_out, W_out)
+
+        return out
