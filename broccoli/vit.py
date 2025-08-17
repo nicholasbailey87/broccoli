@@ -102,6 +102,8 @@ class CCTEncoder(nn.Module):
         if conv_pooling_type == "maxpool":
 
             conv_out_channels = transformer_embedding_size
+            pooling_out_channels = transformer_embedding_size
+            self.pooling_adapter = nn.Identity()
 
             self.pool = nn.MaxPool2d(
                 conv_pooling_kernel_size,
@@ -113,6 +115,16 @@ class CCTEncoder(nn.Module):
 
             conv_out_channels = int(
                 round(transformer_embedding_size / (conv_pooling_kernel_size**2))
+            )
+            pooling_out_channels = conv_pooling_kernel_size**2 * conv_out_channels
+            transformer_input_channels = transformer_embedding_size
+            if activation.__name__.endswith("GLU"):
+                transformer_input_channels *= 2
+            self.pooling_adapter = nn.Sequential(
+                *[
+                    nn.Linear(pooling_out_channels, transformer_input_channels),
+                    self.activation,
+                ]
             )
 
             self.pool = ConcatPool(
@@ -170,6 +182,7 @@ class CCTEncoder(nn.Module):
                 Rearrange("N H W C -> N C H W"),
                 self.pool,
                 Rearrange("N C H W -> N (H W) C"),
+                self.pooling_adapter,
                 self.transformer,
             ]
         )
