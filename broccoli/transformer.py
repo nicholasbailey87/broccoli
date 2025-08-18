@@ -74,6 +74,7 @@ class MHAttention(nn.Module):
         d_model_scale=True,
         log_length_scale=False,
         quiet=False,
+        bos_tokens=0,
         rotary_embedding=None,
         source_size=None,
     ):
@@ -112,6 +113,7 @@ class MHAttention(nn.Module):
         self.quiet = quiet
         self.rotary_embedding = rotary_embedding
         self.source_size = source_size
+        self.bos_tokens = bos_tokens
 
     @property
     def _kv_distance(self) -> float:
@@ -157,14 +159,18 @@ class MHAttention(nn.Module):
 
         # Rearrange dimensions and add RoPE if needed
         if self.rotary_embedding is not None:
-            q = rearrange(
-                q,
+
+            q_bos, q_img = q[:, : self.bos_tokens, :], q[:, self.bos_tokens :, :]
+            k_bos, k_img = k[:, : self.bos_tokens, :], k[:, self.bos_tokens :, :]
+
+            q_img = rearrange(
+                q_img,
                 "b (height width) d -> b height width d",
                 height=self.source_size[0],
                 width=self.source_size[1],
             )
-            k = rearrange(
-                k,
+            k_img = rearrange(
+                k_img,
                 "b (height width) d -> b height width d",
                 height=self.source_size[0],
                 width=self.source_size[1],
@@ -172,10 +178,15 @@ class MHAttention(nn.Module):
             freqs = self.rotary_embedding.get_axial_freqs(
                 self.source_size[0], self.source_size[1]
             )
-            q = apply_rotary_emb(freqs, q)
-            k = apply_rotary_emb(freqs, k)
-            q = rearrange(q, "b height width d -> b (height width) d")
-            k = rearrange(k, "b height width d -> b (height width) d")
+            q_img = apply_rotary_emb(freqs, q_img)
+            k_img = apply_rotary_emb(freqs, k_img)
+
+            q_img = rearrange(q_img, "b height width d -> b (height width) d")
+            k_img = rearrange(k_img, "b height width d -> b (height width) d")
+
+            # Re-combine the BOS tokens and the RoPE-enhanced image tokens
+            q = torch.cat([q_bos, q_img], dim=1)
+            k = torch.cat([k_bos, k_img], dim=1)
 
         # Divide Q/K/V into heads
         q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
@@ -366,7 +377,9 @@ class TransformerEncoder(nn.Module):
         self.position_embedding_type = position_embedding_type
 
         if self.position_embedding_type == "absolute":
-            self.positional_embedding = nn.Embedding(self.full_sequence_length, d_model)
+            self.absolute_positional_embedding = nn.Embedding(
+                self.full_sequence_length, d_model
+            )
 
         self.mlp_dropout = mlp_dropout
         self.msa_dropout = msa_dropout

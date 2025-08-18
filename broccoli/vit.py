@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 from .transformer import TransformerEncoder
@@ -85,19 +86,18 @@ class CCTEncoder(nn.Module):
 
         self.image_size = image_size
 
-        output_size = (  # Output of pooling
-            int(
-                (
-                    image_size
-                    + 2 * conv_pooling_kernel_padding
-                    - conv_pooling_kernel_size
-                )
-                / conv_pooling_kernel_stride
+        # XXX: We assume a square image here
+        output_size = math.floor(
+            (
+                image_size
+                + 2 * self.conv_pooling_kernel_padding
+                - self.conv_pooling_kernel_size
             )
+            / self.conv_pooling_kernel_stride
             + 1
-        )
+        )  # output of pooling
 
-        self.sequence_length = int(output_size) ** 2
+        self.sequence_length = output_size**2
 
         if conv_pooling_type == "maxpool":
 
