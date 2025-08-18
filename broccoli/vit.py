@@ -101,14 +101,23 @@ class CCTEncoder(nn.Module):
             pooling_out_channels = transformer_embedding_size
             self.pooling_adapter = nn.Identity()
 
-            self.pool = nn.MaxPool2d(
-                conv_pooling_kernel_size,
-                stride=conv_pooling_kernel_stride,
-                padding=conv_pooling_kernel_padding,
+            self.pool = nn.Sequential(
+                *[
+                    Rearrange(  # rearrange in case we're using XGLU activation
+                        "N C H W -> N H W C"
+                    ),
+                    self.activation,
+                    Rearrange("N H W C -> N C H W"),
+                    nn.MaxPool2d(
+                        conv_pooling_kernel_size,
+                        stride=conv_pooling_kernel_stride,
+                        padding=conv_pooling_kernel_padding,
+                    ),
+                ]
             )
 
         elif conv_pooling_type == "concat":
-
+            # TODO: make all of this adapter business part of concatpool
             conv_out_channels = int(
                 round(transformer_embedding_size / (conv_pooling_kernel_size**2))
             )
@@ -118,15 +127,21 @@ class CCTEncoder(nn.Module):
                 pooling_adapter_out_channels *= 2
             self.pooling_adapter = nn.Sequential(
                 *[
+                    Rearrange("N C H W -> N (H W) C"),
                     nn.Linear(pooling_out_channels, pooling_adapter_out_channels),
                     self.activation,
                 ]
             )
 
-            self.pool = ConcatPool(
-                conv_pooling_kernel_size,
-                stride=conv_pooling_kernel_stride,
-                padding=conv_pooling_kernel_padding,
+            self.pool = nn.Sequential(
+                *[
+                    ConcatPool(
+                        conv_pooling_kernel_size,
+                        stride=conv_pooling_kernel_stride,
+                        padding=conv_pooling_kernel_padding,
+                    ),
+                    self.pooling_adapter,
+                ]
             )
 
         if transformer_layers > 0:
@@ -171,14 +186,7 @@ class CCTEncoder(nn.Module):
         self.encoder = nn.Sequential(
             *[
                 self.conv,
-                Rearrange(  # rearrange in case we're using XGLU activation
-                    "N C H W -> N H W C"
-                ),
-                self.activation,
-                Rearrange("N H W C -> N C H W"),
                 self.pool,
-                Rearrange("N C H W -> N (H W) C"),
-                self.pooling_adapter,
                 self.transformer,
             ]
         )
