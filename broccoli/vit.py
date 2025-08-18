@@ -113,12 +113,12 @@ class CCTEncoder(nn.Module):
                 round(transformer_embedding_size / (conv_pooling_kernel_size**2))
             )
             pooling_out_channels = conv_pooling_kernel_size**2 * conv_out_channels
-            transformer_input_channels = transformer_embedding_size
+            pooling_adapter_out_channels = transformer_embedding_size
             if activation.__name__.endswith("GLU"):
-                transformer_input_channels *= 2
+                pooling_adapter_out_channels *= 2
             self.pooling_adapter = nn.Sequential(
                 *[
-                    nn.Linear(pooling_out_channels, transformer_input_channels),
+                    nn.Linear(pooling_out_channels, pooling_adapter_out_channels),
                     self.activation,
                 ]
             )
