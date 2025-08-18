@@ -239,6 +239,7 @@ class TransformerBlock(nn.Module):
         n_heads,
         position_embedding_type="absolute",  # absolute or relative
         source_size=None,
+        bos_tokens=0,
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
@@ -288,6 +289,7 @@ class TransformerBlock(nn.Module):
             linear_module=linear_module,
             rotary_embedding=self.rotary_embedding,
             source_size=source_size,
+            bos_tokens=bos_tokens,
         )
 
         # Submodules for the feedforward process
@@ -392,6 +394,7 @@ class TransformerEncoder(nn.Module):
                     n_heads,
                     position_embedding_type=position_embedding_type,
                     source_size=source_size,
+                    bos_tokens=bos_tokens,
                     mlp_ratio=mlp_ratio,
                     activation=activation,
                     activation_kwargs=activation_kwargs,
