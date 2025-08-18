@@ -1,6 +1,6 @@
 [project]
 name = "broccoli-ml"
-version = "0.1.27"
+version = "0.1.28"
 description = "Some useful Pytorch models, circa 2025"
 authors = [
     {name = "Nicholas Bailey"}

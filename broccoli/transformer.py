@@ -379,7 +379,7 @@ class TransformerEncoder(nn.Module):
         self.position_embedding_type = position_embedding_type
 
         if self.position_embedding_type == "absolute":
-            self.absolute_positional_embedding = nn.Embedding(
+            self.absolute_position_embedding = nn.Embedding(
                 self.full_sequence_length, d_model
             )
 
@@ -423,7 +423,7 @@ class TransformerEncoder(nn.Module):
             x = x
 
         if self.position_embedding_type == "absolute":
-            x = x + self.positional_embedding(
+            x = x + self.absolute_position_embedding(
                 torch.arange(
                     0, self.full_sequence_length, dtype=torch.long, device=x.device
                 ).unsqueeze(
