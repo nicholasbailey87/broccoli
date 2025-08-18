@@ -88,12 +88,8 @@ class CCTEncoder(nn.Module):
 
         # XXX: We assume a square image here
         output_size = math.floor(
-            (
-                image_size
-                + 2 * self.conv_pooling_kernel_padding
-                - self.conv_pooling_kernel_size
-            )
-            / self.conv_pooling_kernel_stride
+            (image_size + 2 * conv_pooling_kernel_padding - conv_pooling_kernel_size)
+            / conv_pooling_kernel_stride
             + 1
         )  # output of pooling
 
