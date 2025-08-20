@@ -113,6 +113,7 @@ class CCTEncoder(nn.Module):
                         stride=conv_pooling_kernel_stride,
                         padding=conv_pooling_kernel_padding,
                     ),
+                    Rearrange("N C H W -> N (H W) C"),
                 ]
             )
 
