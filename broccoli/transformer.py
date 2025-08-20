@@ -367,11 +367,11 @@ class TransformerEncoder(nn.Module):
 
         # Initialise BOS tokens with normal init, like usual Pytorch embeddings
         if self._bos_tokens:
-            self._bos = nn.Parameter(torch.empty(self._bos_tokens, d_model))
-            nn.init.normal_(self._bos, mean=0.0, std=1.0)
+            self._bos_embedding = nn.Parameter(torch.empty(self._bos_tokens, d_model))
+            nn.init.normal_(self._bos_embedding, mean=0.0, std=1.0)
             self.full_sequence_length = self.seq_len + self._bos_tokens
         else:
-            self._bos = None
+            self._bos_embedding = None
             self.full_sequence_length = self.seq_len
 
         self.d_model = d_model
@@ -418,7 +418,7 @@ class TransformerEncoder(nn.Module):
 
     def forward(self, x):
         if self._bos_tokens:
-            x = torch.cat([self._bos.expand(x.size(0), -1, -1), x], dim=1)
+            x = torch.cat([self._bos_embedding.expand(x.size(0), -1, -1), x], dim=1)
         else:
             x = x
 
