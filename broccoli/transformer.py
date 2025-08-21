@@ -245,6 +245,7 @@ class TransformerBlock(nn.Module):
         activation_kwargs: Optional[dict] = None,
         mlp_dropout=0.0,
         msa_dropout=0.0,
+        identity_probability=0.0,
         causal=False,
         share_kv=False,
         max_subtract=False,
@@ -254,6 +255,8 @@ class TransformerBlock(nn.Module):
         linear_module=nn.Linear,
     ):
         super().__init__()
+
+        self.identity_probability = identity_probability
 
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
@@ -322,9 +325,26 @@ class TransformerBlock(nn.Module):
         return self.attn._kv_distance
 
     def forward(self, x):
-        normx = self.layer_norm(x)
-        x = x + self.attn(normx, normx, normx)
-        x = x + self.ff_process(x)
+        if not self.training:
+            identity_probability = 0.0
+        else:
+            identity_probability = self.identity_probability
+
+        # perform the identity operation for some rows in the batch
+        identity_count = random.binomial(n=x.size(0), p=identity_probability)
+        shuffle_indices = torch.randperm(x.size(0), device=x.device)
+        unshuffle_indices = torch.argsort(shuffle_indices)
+        shuffled = x[shuffle_indices, :, :]
+        identity_x = shuffled[:identity_count, :, :]
+        process_x = shuffled[identity_count:, :, :]
+
+        norm_process_x = self.layer_norm(process_x)
+        process_x = process_x + self.attn(
+            norm_process_x, norm_process_x, norm_process_x
+        )
+        process_x = process_x + self.ff_process(process_x)
+        x = torch.cat([process_x, identity_x])[unshuffle_indices, :, :].contiguous()
+
         return x
 
 
@@ -386,6 +406,16 @@ class TransformerEncoder(nn.Module):
         self.mlp_dropout = mlp_dropout
         self.msa_dropout = msa_dropout
         self.stochastic_depth = stochastic_depth
+
+        assert isinstance(n_layers, int)  # XXX: make this a proper Exception
+        if n_layers == 1:
+            self.stochastic_depth_probabilities = [0.0]
+        else:
+            step_size = self.stochastic_depth / (n_layers - 1)
+            self.stochastic_depth_probabilities = [
+                i * step_size for i in range(n_layers)
+            ]
+
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -400,6 +430,7 @@ class TransformerEncoder(nn.Module):
                     activation_kwargs=activation_kwargs,
                     mlp_dropout=mlp_dropout,
                     msa_dropout=msa_dropout,
+                    identity_probability=self.stochastic_depth_probabilities[i],
                     causal=causal,
                     share_kv=share_kv,
                     max_subtract=max_subtract,
@@ -408,7 +439,7 @@ class TransformerEncoder(nn.Module):
                     quiet_attention=quiet_attention,
                     linear_module=linear_module,
                 )
-                for _ in range(n_layers)
+                for i in range(n_layers)
             ]
         )
 
@@ -432,18 +463,7 @@ class TransformerEncoder(nn.Module):
             )
 
         for block in self.blocks:
-            if (not self.training) or self.stochastic_depth == 0.0:
-                x = block(x)
-            else:  # drop out some rows from the next Transformer block operation
-                binomial = random.binomial(n=x.size(0), p=1 - self.stochastic_depth)
-                shuffle_indices = torch.randperm(x.size(0), device=x.device)
-                unshuffle_indices = torch.argsort(shuffle_indices)  # , device=x.device)
-                shuffled = x[shuffle_indices, :, :]
-                include = shuffled[:binomial, :, :]
-                exclude = shuffled[binomial:, :, :]
-                x = torch.cat([block(include), exclude])[
-                    unshuffle_indices, :, :
-                ].contiguous()
+            x = block(x)
 
         if self._bos_tokens:
             return x[:, self._bos_tokens :, :]
