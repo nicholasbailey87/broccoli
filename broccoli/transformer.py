@@ -343,7 +343,7 @@ class TransformerBlock(nn.Module):
             norm_process_x, norm_process_x, norm_process_x
         )
         process_x = process_x + self.ff_process(process_x)
-        x = torch.cat([process_x, identity_x])[unshuffle_indices, :, :].contiguous()
+        x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
 
         return x
 
