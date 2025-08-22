@@ -301,6 +301,8 @@ class ConcatPool(nn.Module):
         them channel-wise.
     """
 
+    # TODO: change this to use nn.Fold instead of view, which is equivlent but more readable
+
     def __init__(self, kernel_size, stride=1, padding=0, dilation=1):
         super().__init__()
 
