@@ -7,6 +7,17 @@ from .activation import ReLU, SquaredReLU, GELU, SwiGLU
 from einops import einsum
 from einops.layers.torch import Rearrange
 import torch.nn as nn
+import torch.nn.functional as F
+
+
+class PadTensor(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.args = args
+        self.kwargs = kwargs
+
+    def forward(self, x):
+        return F.pad(x, *self.args, **self.kwargs)
 
 
 class SequencePool(nn.Module):
@@ -110,7 +121,7 @@ class CCTEncoder(nn.Module):
             conv_out_channels = transformer_embedding_size
         elif conv_pooling_type == "concat":
             conv_out_channels = int(
-                round(transformer_embedding_size / (conv_pooling_kernel_size**2))
+                math.floor(transformer_embedding_size / (conv_pooling_kernel_size**2))
             )
 
         # This if block rhymes:
@@ -144,11 +155,15 @@ class CCTEncoder(nn.Module):
             )
 
         elif conv_pooling_type == "concat":
-            concatpool_activation_output_size = (
+            concatpool_activation_output_channels = (
                 conv_pooling_kernel_size**2 * conv_out_channels
             )
             if cnn_activation.__name__.endswith("GLU"):
-                concatpool_activation_output_size /= 2
+                concatpool_activation_output_channels /= 2
+
+            concatpool_padding = (
+                transformer_embedding_size - concatpool_activation_output_channels
+            )
 
             self.pool = nn.Sequential(
                 *[
@@ -162,10 +177,7 @@ class CCTEncoder(nn.Module):
                     ),
                     self.cnn_activation,
                     Rearrange("N H W C -> N (H W) C"),
-                    nn.Linear(
-                        concatpool_activation_output_size, transformer_embedding_size
-                    ),
-                    self.cnn_activation,
+                    PadTensor((0, concatpool_padding)),
                 ]
             )
 
