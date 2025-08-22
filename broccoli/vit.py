@@ -244,6 +244,7 @@ class CCT(nn.Module):
         image_classes=100,
         linear_module=nn.Linear,
         image_channels=3,
+        batch_norm=False,
     ):
 
         super().__init__()
@@ -275,6 +276,7 @@ class CCT(nn.Module):
             stochastic_depth=stochastic_depth,
             linear_module=linear_module,
             image_channels=image_channels,
+            batch_norm=batch_norm,
         )
         self.pool = SequencePool(
             transformer_embedding_size, linear_module, image_classes
