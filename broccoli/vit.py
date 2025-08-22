@@ -3,6 +3,7 @@ from typing import Optional
 
 from .transformer import TransformerEncoder
 from .cnn import ConvLayer, ConcatPool
+from .activation import ReLU, SquaredReLU, GELU, SwiGLU
 from einops import einsum
 from einops.layers.torch import Rearrange
 import torch.nn as nn
@@ -248,6 +249,22 @@ class CCT(nn.Module):
     ):
 
         super().__init__()
+
+        if isinstance(cnn_activation, str):
+            cnn_activation = {
+                "ReLU": ReLU,
+                "SquaredReLU": SquaredReLU,
+                "GELU": GELU,
+                "SwiGLU": SwiGLU,
+            }[cnn_activation]
+
+        if isinstance(transformer_activation, str):
+            transformer_activation = {
+                "ReLU": ReLU,
+                "SquaredReLU": SquaredReLU,
+                "GELU": GELU,
+                "SwiGLU": SwiGLU,
+            }[transformer_activation]
 
         self.encoder = CCTEncoder(
             image_size=image_size,
