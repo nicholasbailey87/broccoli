@@ -67,6 +67,7 @@ class CCTEncoder(nn.Module):
         conv_pooling_kernel_size=3,
         conv_pooling_kernel_stride=2,
         conv_pooling_kernel_padding=1,
+        conv_dropout=0.0,
         transformer_position_embedding="absolute",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -155,15 +156,16 @@ class CCTEncoder(nn.Module):
             )
 
         elif conv_pooling_type == "concat":
-            concatpool_activation_output_channels = (
-                conv_pooling_kernel_size**2 * conv_out_channels
+            self.concatpool_activation = transformer_activation(
+                **transformer_activation_kwargs
             )
-            if cnn_activation.__name__.endswith("GLU"):
-                concatpool_activation_output_channels /= 2
 
-            concatpool_padding = (
-                transformer_embedding_size - concatpool_activation_output_channels
-            )
+            concatpool_out_channels = conv_pooling_kernel_size**2 * conv_out_channels
+
+            if cnn_activation.__name__.endswith("GLU"):
+                cnn_activation_output_channels = concatpool_out_channels / 2
+            else:
+                cnn_activation_output_channels = concatpool_out_channels
 
             self.pool = nn.Sequential(
                 *[
@@ -176,8 +178,24 @@ class CCTEncoder(nn.Module):
                         "N C H W -> N H W C"
                     ),
                     self.cnn_activation,
-                    Rearrange("N H W C -> N (H W) C"),
-                    PadTensor((0, concatpool_padding)),
+                    nn.Dropout(conv_dropout),
+                    Rearrange(  # rearrange in case we're using XGLU activation
+                        "N H W C -> N C H W"
+                    ),
+                    nn.BatchNorm2d(cnn_activation_output_channels),
+                    Rearrange(  # rearrange in case we're using XGLU activation
+                        "N C H W -> N (H W) C"
+                    ),
+                    nn.Linear(
+                        cnn_activation_output_channels,
+                        (
+                            2 * transformer_embedding_size * transformer_mlp_ratio
+                            if transformer_activation.__name__.endswith("GLU")
+                            else transformer_embedding_size * transformer_mlp_ratio
+                        ),
+                    ),
+                    self.concatpool_activation,
+                    nn.Linear(transformer_embedding_size * transformer_mlp_ratio),
                 ]
             )
 
