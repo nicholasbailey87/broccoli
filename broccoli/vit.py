@@ -156,9 +156,13 @@ class CCTEncoder(nn.Module):
             )
 
         elif conv_pooling_type == "concat":
-            self.concatpool_activation = transformer_activation(
-                **transformer_activation_kwargs
-            )
+
+            if transformer_activation_kwargs is not None:
+                self.concatpool_activation = transformer_activation(
+                    **transformer_activation_kwargs
+                )
+            else:
+                self.concatpool_activation = transformer_activation()
 
             concatpool_out_channels = conv_pooling_kernel_size**2 * conv_out_channels
 
