@@ -199,7 +199,10 @@ class CCTEncoder(nn.Module):
                         ),
                     ),
                     self.concatpool_activation,
-                    nn.Linear(transformer_embedding_size * transformer_mlp_ratio),
+                    nn.Linear(
+                        transformer_embedding_size * transformer_mlp_ratio,
+                        transformer_embedding_size,
+                    ),
                 ]
             )
 
