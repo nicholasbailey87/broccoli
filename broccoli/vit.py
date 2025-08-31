@@ -195,12 +195,6 @@ class CCTEncoder(nn.Module):
             ]
         )
 
-        activated_cnn_channels = (
-            cnn_out_channels
-            if cnn_activation.__name__.endswith("GLU")
-            else int(cnn_out_channels / 2)
-        )
-
         if pooling_type is None:
             self.pool = nn.Sequential(
                 *[
@@ -233,7 +227,9 @@ class CCTEncoder(nn.Module):
             else:
                 self.concatpool_activation = transformer_activation()
 
-            concatpool_out_channels = pooling_kernel_voxels * activated_cnn_channels
+            concatpool_out_channels = (
+                pooling_kernel_voxels * cnn_activation_out_channels
+            )
 
             self.pool = nn.Sequential(
                 *[
