@@ -139,10 +139,10 @@ class CCTEncoder(nn.Module):
             if pooling_type is None
             else calculate_output_spatial_size(
                 cnn_output_size,
-                kernel_size=cnn_kernel_size,
-                stride=cnn_kernel_stride,
-                padding=cnn_kernel_padding,
-                dilation=cnn_kernel_dilation,
+                kernel_size=pooling_kernel_size,
+                stride=pooling_kernel_stride,
+                padding=pooling_kernel_padding,
+                dilation=1,
             )
         )
 
