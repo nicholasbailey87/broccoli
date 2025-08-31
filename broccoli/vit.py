@@ -1,8 +1,8 @@
 import math
 from typing import Optional
 
-from .transformer import TransformerEncoder
-from .cnn import ConvLayer, ConcatPool
+from .transformer import TransformerEncoder, DenoisingAutoEncoder
+from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
 from .activation import ReLU, SquaredReLU, GELU, SwiGLU
 from einops import einsum
 from einops.layers.torch import Rearrange
@@ -61,13 +61,20 @@ class CCTEncoder(nn.Module):
 
     def __init__(
         self,
-        image_size=32,
-        conv_kernel_size=3,
-        conv_pooling_type="maxpool",
-        conv_pooling_kernel_size=3,
-        conv_pooling_kernel_stride=2,
-        conv_pooling_kernel_padding=1,
-        conv_dropout=0.0,
+        input_size=(32, 32),
+        cnn_in_channels=3,
+        cnn_kernel_size=3,
+        cnn_kernel_stride=1,
+        cnn_kernel_padding="same",
+        cnn_kernel_dilation=1,
+        cnn_kernel_groups=1,
+        cnn_activation: nn.Module = nn.ReLU,
+        cnn_activation_kwargs: Optional[dict] = None,
+        cnn_dropout=0.0,
+        pooling_type="maxpool",
+        pooling_kernel_size=3,
+        pooling_kernel_stride=2,
+        pooling_kernel_padding=1,
         transformer_position_embedding="absolute",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -79,20 +86,14 @@ class CCTEncoder(nn.Module):
         tranformer_d_model_scale=True,
         tranformer_log_length_scale=True,
         tranformer_quiet_attention=True,
-        cnn_activation: nn.Module = nn.ReLU,
-        cnn_activation_kwargs: Optional[dict] = None,
         transformer_activation: nn.Module = nn.GELU,
         transformer_activation_kwargs: Optional[dict] = None,
         mlp_dropout=0.0,
         msa_dropout=0.1,
         stochastic_depth=0.1,
         linear_module=nn.Linear,
-        image_channels=3,
-        batch_norm=False,
+        batch_norm=True,
     ):
-        if conv_pooling_type not in ["maxpool", "concat"]:
-            raise NotImplementedError("Pooling type must be maxpool or concat")
-
         super().__init__()
 
         if cnn_activation_kwargs is not None:
@@ -107,55 +108,115 @@ class CCTEncoder(nn.Module):
         else:
             self.transformer_activation = transformer_activation()
 
-        self.image_size = image_size
+        self.input_size = input_size
+        self.spatial_dimensions = len(self.input_size)
 
-        # XXX: We assume a square image here
-        output_size = math.floor(
-            (image_size + 2 * conv_pooling_kernel_padding - conv_pooling_kernel_size)
-            / conv_pooling_kernel_stride
-            + 1
-        )  # output of pooling
-
-        self.sequence_length = output_size**2
-
-        if conv_pooling_type == "maxpool":
-            conv_out_channels = transformer_embedding_size
-        elif conv_pooling_type == "concat":
-            conv_out_channels = int(
-                math.floor(transformer_embedding_size / (conv_pooling_kernel_size**2))
+        if self.spatial_dimensions == 1:
+            maxpoolxd = nn.MaxPool1d
+            convxd = nn.Conv1d
+            batchnormxd = nn.BatchNorm1d
+            spatial_dim_names = "D1"
+        if self.spatial_dimensions == 2:
+            maxpoolxd = nn.MaxPool2d
+            convxd = nn.Conv2d
+            batchnormxd = nn.BatchNorm1d
+            spatial_dim_names = "D1 D2"
+        if self.spatial_dimensions == 3:
+            maxpoolxd = nn.MaxPool3d
+            convxd = nn.Conv3d
+            batchnormxd = nn.BatchNorm3d
+            spatial_dim_names = "D1 D2 D3"
+        else:
+            raise NotImplementedError(
+                "`input_size` must be a tuple of length 1, 2, or 3."
             )
 
-        # This if block rhymes:
-        if cnn_activation.__name__.endswith("GLU"):
-            conv_out_channels *= 2
-
-        self.conv = ConvLayer(
-            image_channels,
-            conv_out_channels,
-            kernel_size=conv_kernel_size,
-            stride=1,
-            padding="same",
-            linear_module=linear_module,
+        output_size = calculate_output_spatial_size(
+            input_size,
+            kernel_size=cnn_kernel_size,
+            stride=cnn_kernel_stride,
+            padding=cnn_kernel_padding,
+            dilation=cnn_kernel_dilation,
         )
 
-        if conv_pooling_type == "maxpool":
+        self.sequence_length = math.product(output_size)  # One token per voxel
+        pooling_kernel_voxels = math.product(
+            spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
+        )
+
+        if pooling_type in ["maxpool", None]:
+            cnn_out_channels = transformer_embedding_size
+        elif pooling_type == "concat":
+            cnn_out_channels = math.floor(
+                transformer_embedding_size / pooling_kernel_voxels
+            )
+        else:
+            raise NotImplementedError("Pooling type must be maxpool, concat or None")
+
+        cnn_activation_out_channels = cnn_out_channels
+
+        # This block rhymes:
+        if cnn_activation.__name__.endswith("GLU"):
+            cnn_out_channels *= 2
+
+        self.cnn = convxd(
+            cnn_in_channels,
+            cnn_out_channels,
+            cnn_kernel_size,
+            stride=cnn_kernel_stride,
+            cnn_kernel_padding=0,
+            dilation=cnn_kernel_dilation,
+            groups=cnn_kernel_groups,
+            bias=True,
+            padding_mode="zeros",
+        )
+
+        self.activate_and_dropout = nn.Sequential(
+            *[
+                Rearrange(  # rearrange in case we're using XGLU activation
+                    f"N C {spatial_dim_names} -> N {spatial_dim_names} C"
+                ),
+                self.cnn_activation,
+                Rearrange(f"N {spatial_dim_names} C -> N C {spatial_dim_names}"),
+                nn.Dropout(cnn_dropout),
+                (
+                    batchnormxd(cnn_activation_out_channels)
+                    if batch_norm
+                    else nn.Identity()
+                ),
+            ]
+        )
+
+        activated_cnn_channels = (
+            cnn_out_channels
+            if cnn_activation.__name__.endswith("GLU")
+            else int(cnn_out_channels / 2)
+        )
+
+        if pooling_type is None:
             self.pool = nn.Sequential(
                 *[
-                    Rearrange(  # rearrange in case we're using XGLU activation
-                        "N C H W -> N H W C"
-                    ),
-                    self.cnn_activation,
-                    Rearrange("N H W C -> N C H W"),
-                    nn.MaxPool2d(
-                        conv_pooling_kernel_size,
-                        stride=conv_pooling_kernel_stride,
-                        padding=conv_pooling_kernel_padding,
-                    ),
-                    Rearrange("N C H W -> N (H W) C"),  # for transformer
+                    Rearrange(
+                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
+                    ),  # for transformer
                 ]
             )
 
-        elif conv_pooling_type == "concat":
+        elif pooling_type == "maxpool":
+            self.pool = nn.Sequential(
+                *[
+                    maxpoolxd(
+                        pooling_kernel_size,
+                        stride=pooling_kernel_stride,
+                        padding=pooling_kernel_padding,
+                    ),
+                    Rearrange(
+                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
+                    ),  # for transformer
+                ]
+            )
+
+        elif pooling_type == "concat":
 
             if transformer_activation_kwargs is not None:
                 self.concatpool_activation = transformer_activation(
@@ -164,44 +225,27 @@ class CCTEncoder(nn.Module):
             else:
                 self.concatpool_activation = transformer_activation()
 
-            concatpool_out_channels = conv_pooling_kernel_size**2 * conv_out_channels
-
-            if cnn_activation.__name__.endswith("GLU"):
-                cnn_activation_output_channels = concatpool_out_channels / 2
-            else:
-                cnn_activation_output_channels = concatpool_out_channels
+            concatpool_out_channels = pooling_kernel_voxels * activated_cnn_channels
 
             self.pool = nn.Sequential(
                 *[
-                    ConcatPool(
-                        conv_pooling_kernel_size,
-                        stride=conv_pooling_kernel_stride,
-                        padding=conv_pooling_kernel_padding,
+                    SpaceToDepth(
+                        pooling_kernel_size,
+                        stride=pooling_kernel_stride,
+                        padding=pooling_kernel_padding,
+                        spatial_dimensions=self.spatial_dimensions,
                     ),
-                    Rearrange(  # rearrange in case we're using XGLU activation
-                        "N C H W -> N H W C"
+                    Rearrange(  # for transformer
+                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                     ),
-                    self.cnn_activation,
-                    nn.Dropout(conv_dropout),
-                    Rearrange(  # rearrange in case we're using XGLU activation
-                        "N H W C -> N C H W"
-                    ),
-                    nn.BatchNorm2d(cnn_activation_output_channels),
-                    Rearrange(  # rearrange in case we're using XGLU activation
-                        "N C H W -> N (H W) C"
-                    ),
-                    nn.Linear(
-                        cnn_activation_output_channels,
-                        (
-                            2 * transformer_embedding_size * transformer_mlp_ratio
-                            if transformer_activation.__name__.endswith("GLU")
-                            else transformer_embedding_size * transformer_mlp_ratio
-                        ),
-                    ),
-                    self.concatpool_activation,
-                    nn.Linear(
-                        transformer_embedding_size * transformer_mlp_ratio,
+                    DenoisingAutoEncoder(
+                        concatpool_out_channels,
+                        transformer_mlp_ratio,
                         transformer_embedding_size,
+                        activation=transformer_activation,
+                        activation_kwargs=transformer_activation_kwargs,
+                        dropout=0.0,
+                        linear_module=linear_module,
                     ),
                 ]
             )
@@ -213,7 +257,7 @@ class CCTEncoder(nn.Module):
                 transformer_layers,
                 transformer_heads,
                 position_embedding_type=transformer_position_embedding,
-                source_size=(output_size, output_size),
+                source_size=output_size,
                 mlp_ratio=transformer_mlp_ratio,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
@@ -234,8 +278,9 @@ class CCTEncoder(nn.Module):
 
         self.encoder = nn.Sequential(
             *[
-                nn.BatchNorm2d(image_channels) if batch_norm else nn.Identity(),
-                self.conv,
+                batchnormxd(cnn_in_channels) if batch_norm else nn.Identity(),
+                self.cnn,
+                self.activate_and_dropout,
                 self.pool,
                 self.transformer,
             ]
@@ -255,8 +300,16 @@ class CCT(nn.Module):
 
     def __init__(
         self,
-        image_size=32,
-        conv_kernel_size=3,  # Only 2 is supported for eigenvector initialisation
+        input_size=(32, 32),
+        cnn_in_channels=3,
+        cnn_kernel_size=3,
+        cnn_kernel_stride=1,
+        cnn_kernel_padding="same",
+        cnn_kernel_dilation=1,
+        cnn_kernel_groups=1,
+        cnn_activation: nn.Module = nn.ReLU,
+        cnn_activation_kwargs: Optional[dict] = None,
+        cnn_dropout=0.0,
         pooling_type="maxpool",
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
@@ -272,17 +325,14 @@ class CCT(nn.Module):
         tranformer_d_model_scale=True,
         tranformer_log_length_scale=True,
         tranformer_quiet_attention=True,
-        cnn_activation: nn.Module = nn.ReLU,
-        cnn_activation_kwargs: Optional[dict] = None,
         transformer_activation: nn.Module = nn.GELU,
         transformer_activation_kwargs: Optional[dict] = None,
-        mlp_dropout=0.0,  # The original paper got best performance from mlp_dropout=0.
-        msa_dropout=0.1,  # "" msa_dropout=0.1
-        stochastic_depth=0.1,  # "" stochastic_depth=0.1
-        image_classes=100,
+        mlp_dropout=0.0,
+        msa_dropout=0.1,
+        stochastic_depth=0.1,
         linear_module=nn.Linear,
-        image_channels=3,
-        batch_norm=False,
+        batch_norm=True,
+        image_classes=100,
     ):
 
         super().__init__()
@@ -304,12 +354,20 @@ class CCT(nn.Module):
             }[transformer_activation]
 
         self.encoder = CCTEncoder(
-            image_size=image_size,
-            conv_kernel_size=conv_kernel_size,
-            conv_pooling_type=pooling_type,
-            conv_pooling_kernel_size=pooling_kernel_size,
-            conv_pooling_kernel_stride=pooling_kernel_stride,
-            conv_pooling_kernel_padding=pooling_kernel_padding,
+            input_size=input_size,
+            cnn_in_channels=cnn_in_channels,
+            cnn_kernel_size=cnn_kernel_size,
+            cnn_kernel_stride=cnn_kernel_stride,
+            cnn_kernel_padding=cnn_kernel_padding,
+            cnn_kernel_dilation=cnn_kernel_dilation,
+            cnn_kernel_groups=cnn_kernel_groups,
+            cnn_activation=cnn_activation,
+            cnn_activation_kwargs=cnn_activation_kwargs,
+            cnn_dropout=cnn_dropout,
+            pooling_type=pooling_type,
+            pooling_kernel_size=pooling_kernel_size,
+            pooling_kernel_stride=pooling_kernel_stride,
+            pooling_kernel_padding=pooling_kernel_padding,
             transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
@@ -321,15 +379,12 @@ class CCT(nn.Module):
             tranformer_d_model_scale=tranformer_d_model_scale,
             tranformer_log_length_scale=tranformer_log_length_scale,
             tranformer_quiet_attention=tranformer_quiet_attention,
-            cnn_activation=cnn_activation,
-            cnn_activation_kwargs=cnn_activation_kwargs,
             transformer_activation=transformer_activation,
             transformer_activation_kwargs=transformer_activation_kwargs,
             mlp_dropout=mlp_dropout,
             msa_dropout=msa_dropout,
             stochastic_depth=stochastic_depth,
             linear_module=linear_module,
-            image_channels=image_channels,
             batch_norm=batch_norm,
         )
         self.pool = SequencePool(

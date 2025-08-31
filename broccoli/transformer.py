@@ -160,29 +160,52 @@ class MHAttention(nn.Module):
         # Rearrange dimensions and add RoPE if needed
         if self.rotary_embedding is not None:
 
+            if len(self.source_size) == 1:
+                spatial_dimension_names = "D1"
+                spatial_dimension_values = {"D1": self.source_size[0]}
+            elif len(self.source_size) == 2:
+                spatial_dimension_names = "D1 D2"
+                spatial_dimension_values = {
+                    "D1": self.source_size[0],
+                    "D2": self.source_size[1],
+                }
+            if len(self.source_size) == 3:
+                spatial_dimension_names = "D1 D2 D3"
+                spatial_dimension_values = {
+                    "D1": self.source_size[0],
+                    "D2": self.source_size[1],
+                    "D3": self.source_size[2],
+                }
+            else:
+                raise NotImplementedError(
+                    "`source_size` must be a tuple of 1, 2 or 3 integers"
+                )
+
             q_bos, q_img = q[:, : self.bos_tokens, :], q[:, self.bos_tokens :, :]
             k_bos, k_img = k[:, : self.bos_tokens, :], k[:, self.bos_tokens :, :]
 
             q_img = rearrange(
                 q_img,
-                "b (height width) d -> b height width d",
-                height=self.source_size[0],
-                width=self.source_size[1],
+                f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
+                **spatial_dimension_values,
             )
             k_img = rearrange(
                 k_img,
-                "b (height width) d -> b height width d",
-                height=self.source_size[0],
-                width=self.source_size[1],
+                f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
+                **spatial_dimension_values,
             )
-            freqs = self.rotary_embedding.get_axial_freqs(
-                self.source_size[0], self.source_size[1]
-            )
+            freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
             q_img = apply_rotary_emb(freqs, q_img)
             k_img = apply_rotary_emb(freqs, k_img)
 
-            q_img = rearrange(q_img, "b height width d -> b (height width) d")
-            k_img = rearrange(k_img, "b height width d -> b (height width) d")
+            q_img = rearrange(
+                q_img,
+                f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
+            )
+            k_img = rearrange(
+                k_img,
+                f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
+            )
 
             # Re-combine the BOS tokens and the RoPE-enhanced image tokens
             q = torch.cat([q_bos, q_img], dim=1)
@@ -223,6 +246,50 @@ class MHAttention(nn.Module):
         return self.out_proj(output_without_heads)
 
 
+class DenoisingAutoEncoder(nn.Module):
+    """
+    A denoising autoencoder, of the type used in transformer blocks.
+    """
+
+    def __init__(
+        self,
+        input_features,
+        ratio,
+        output_features,
+        activation=nn.ReLU,
+        activation_kwargs=None,
+        dropout=0.0,
+        linear_module=nn.Linear,
+    ):
+        super().__init__()
+
+        if activation_kwargs is not None:
+            self.activation = activation(**activation_kwargs)
+        else:
+            self.activation = activation()
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.process = nn.Sequential(
+            *[
+                linear_module(
+                    input_features,
+                    (
+                        2 * ratio * input_features
+                        if activation.__name__.endswith("GLU")
+                        else ratio * input_features
+                    ),
+                ),
+                self.activation,
+                self.dropout,
+                linear_module(ratio * input_features, output_features),
+            ]
+        )
+
+    def forward(self, x):
+        return self.process(x)
+
+
 class TransformerBlock(nn.Module):
     """
     Performs LayerNorms first (as in PyTorch Transformers when norm_first=True),
@@ -258,17 +325,12 @@ class TransformerBlock(nn.Module):
 
         self.identity_probability = identity_probability
 
-        if activation_kwargs is not None:
-            self.activation = activation(**activation_kwargs)
-        else:
-            self.activation = activation()
-
         # Submodules for applying attention
         self.layer_norm = nn.LayerNorm(d_model)
 
         if position_embedding_type == "relative":
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
-            if d_model < 48:
+            if d_model < 16:
                 dim = d_model
             else:
                 dim = 16
@@ -301,20 +363,17 @@ class TransformerBlock(nn.Module):
                 [
                     ("layer_norm", nn.LayerNorm(d_model)),
                     (
-                        # up_projection is appropriate to activation
-                        "up_projection",
-                        linear_module(
+                        "denoising_autoencoder",
+                        DenoisingAutoEncoder(
                             d_model,
-                            (
-                                2 * mlp_ratio * d_model
-                                if activation.__name__.endswith("GLU")
-                                else mlp_ratio * d_model
-                            ),
+                            mlp_ratio,
+                            d_model,
+                            activation=activation,
+                            activation_kwargs=activation_kwargs,
+                            dropout=0.0,
+                            linear_module=linear_module,
                         ),
                     ),
-                    # xGLU activations will halve embedding size
-                    ("activation", self.activation),
-                    ("down_projection", linear_module(mlp_ratio * d_model, d_model)),
                     ("dropout", nn.Dropout(mlp_dropout)),
                 ]
             )
@@ -419,7 +478,7 @@ class TransformerEncoder(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
-                    seq_len,
+                    self.full_sequence_length,
                     d_model,
                     n_heads,
                     position_embedding_type=position_embedding_type,
