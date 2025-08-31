@@ -135,17 +135,15 @@ class CCTEncoder(nn.Module):
         )
 
         pooling_output_size = (
-            (
-                cnn_output_size
-                if pooling_type is None
-                else calculate_output_spatial_size(
-                    cnn_output_size,
-                    kernel_size=cnn_kernel_size,
-                    stride=cnn_kernel_stride,
-                    padding=cnn_kernel_padding,
-                    dilation=cnn_kernel_dilation,
-                )
-            ),
+            cnn_output_size
+            if pooling_type is None
+            else calculate_output_spatial_size(
+                cnn_output_size,
+                kernel_size=cnn_kernel_size,
+                stride=cnn_kernel_stride,
+                padding=cnn_kernel_padding,
+                dilation=cnn_kernel_dilation,
+            )
         )
 
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
