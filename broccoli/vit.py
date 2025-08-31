@@ -159,7 +159,7 @@ class CCTEncoder(nn.Module):
             cnn_out_channels,
             cnn_kernel_size,
             stride=cnn_kernel_stride,
-            cnn_kernel_padding=0,
+            padding=cnn_kernel_padding,
             dilation=cnn_kernel_dilation,
             groups=cnn_kernel_groups,
             bias=True,
