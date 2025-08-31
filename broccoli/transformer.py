@@ -83,14 +83,15 @@ class MHAttention(nn.Module):
         self.embed_dim = embed_dim
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
+
         self.head_dim = self.embed_dim // self.n_heads
+
         self.q_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
-        if self.share_kv:
-            self.v_proj = self.k_proj
-        else:
-            self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+        self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
+
         self.causal = causal
         self.seq_len = seq_len
         self.dropout = nn.Dropout(dropout)
