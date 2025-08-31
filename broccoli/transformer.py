@@ -143,10 +143,7 @@ class MHAttention(nn.Module):
         # Project q, k and v
         q = self.q_proj(q)
         k = self.k_proj(k)
-        if self.share_kv:
-            v = self.k_proj(v)
-        else:
-            v = self.v_proj(v)
+        v = self.v_proj(v)
 
         # Rearrange dimensions and add RoPE if needed
         if self.rotary_embedding is not None:
