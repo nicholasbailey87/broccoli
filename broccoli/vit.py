@@ -114,7 +114,7 @@ class CCTEncoder(nn.Module):
         elif self.spatial_dimensions == 2:
             maxpoolxd = nn.MaxPool2d
             convxd = nn.Conv2d
-            batchnormxd = nn.BatchNorm1d
+            batchnormxd = nn.BatchNorm2d
             spatial_dim_names = "D1 D2"
         elif self.spatial_dimensions == 3:
             maxpoolxd = nn.MaxPool3d
