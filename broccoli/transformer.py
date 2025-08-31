@@ -157,7 +157,7 @@ class MHAttention(nn.Module):
                     "D1": self.source_size[0],
                     "D2": self.source_size[1],
                 }
-            if len(self.source_size) == 3:
+            elif len(self.source_size) == 3:
                 spatial_dimension_names = "D1 D2 D3"
                 spatial_dimension_values = {
                     "D1": self.source_size[0],
