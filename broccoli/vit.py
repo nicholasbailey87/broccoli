@@ -126,7 +126,7 @@ class CCTEncoder(nn.Module):
                 "`input_size` must be a tuple of length 1, 2, or 3."
             )
 
-        output_size = calculate_output_spatial_size(
+        cnn_output_size = calculate_output_spatial_size(
             input_size,
             kernel_size=cnn_kernel_size,
             stride=cnn_kernel_stride,
@@ -134,7 +134,22 @@ class CCTEncoder(nn.Module):
             dilation=cnn_kernel_dilation,
         )
 
-        self.sequence_length = math.prod(output_size)  # One token per voxel
+        pooling_output_size = (
+            (
+                cnn_output_size
+                if pooling_type is None
+                else calculate_output_spatial_size(
+                    cnn_output_size,
+                    kernel_size=cnn_kernel_size,
+                    stride=cnn_kernel_stride,
+                    padding=cnn_kernel_padding,
+                    dilation=cnn_kernel_dilation,
+                )
+            ),
+        )
+
+        self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
+
         pooling_kernel_voxels = math.prod(
             spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
         )
@@ -252,7 +267,7 @@ class CCTEncoder(nn.Module):
                 transformer_layers,
                 transformer_heads,
                 position_embedding_type=transformer_position_embedding,
-                source_size=output_size,
+                source_size=pooling_output_size,
                 mlp_ratio=transformer_mlp_ratio,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
