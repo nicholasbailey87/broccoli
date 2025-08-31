@@ -291,11 +291,6 @@ class TransformerBlock(nn.Module):
         msa_dropout=0.0,
         identity_probability=0.0,
         causal=False,
-        share_kv=False,
-        max_subtract=False,
-        d_model_scale=True,
-        log_length_scale=False,
-        quiet_attention=False,
         linear_module=nn.Linear,
     ):
         super().__init__()
@@ -323,11 +318,6 @@ class TransformerBlock(nn.Module):
             dropout=msa_dropout,
             causal=causal,
             seq_len=seq_len,
-            share_kv=share_kv,
-            max_subtract=max_subtract,
-            d_model_scale=d_model_scale,
-            log_length_scale=log_length_scale,
-            quiet=quiet_attention,
             linear_module=linear_module,
             rotary_embedding=self.rotary_embedding,
             source_size=source_size,
@@ -405,11 +395,6 @@ class TransformerEncoder(nn.Module):
         msa_dropout=0.0,
         stochastic_depth=0.0,
         causal=False,
-        share_kv=False,
-        max_subtract=False,
-        d_model_scale=True,
-        log_length_scale=False,
-        quiet_attention=False,
         linear_module=nn.Linear,
         bos_tokens=0,
     ):
@@ -468,11 +453,6 @@ class TransformerEncoder(nn.Module):
                     msa_dropout=msa_dropout,
                     identity_probability=self.stochastic_depth_probabilities[i],
                     causal=causal,
-                    share_kv=share_kv,
-                    max_subtract=max_subtract,
-                    d_model_scale=d_model_scale,
-                    log_length_scale=log_length_scale,
-                    quiet_attention=quiet_attention,
                     linear_module=linear_module,
                 )
                 for i in range(n_layers)
