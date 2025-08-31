@@ -139,8 +139,8 @@ class CCTEncoder(nn.Module):
             dilation=cnn_kernel_dilation,
         )
 
-        self.sequence_length = math.product(output_size)  # One token per voxel
-        pooling_kernel_voxels = math.product(
+        self.sequence_length = math.prod(output_size)  # One token per voxel
+        pooling_kernel_voxels = math.prod(
             spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
         )
 
