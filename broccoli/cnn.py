@@ -371,13 +371,22 @@ def calculate_output_spatial_size(
     """
     Calculate the output size for the spatial dimensions of a convolutional operation
     """
-    # Ensure kernel_size, stride, etc. are tuples
-    kernel_size = spatial_tuple(kernel_size, len(input_spatial_size))
     stride = spatial_tuple(stride, len(input_spatial_size))
+
+    # Handle padding keywords that are sometimes used
+    if padding == "same":
+        output_size = ()
+        for i, in_length in enumerate(input_spatial_size):
+            output_size += (math.ceil(in_length / stride[i]),)
+        return output_size
+    elif padding == "valid":
+        padding = 0
+
+    kernel_size = spatial_tuple(kernel_size, len(input_spatial_size))
     padding = spatial_tuple(padding, len(input_spatial_size))
     dilation = spatial_tuple(dilation, len(input_spatial_size))
 
-    output_size = ()  # This is how to initialise an empty tuple!!
+    output_size = ()
 
     for i, in_length in enumerate(input_spatial_size):
         output_size += (
@@ -387,6 +396,7 @@ def calculate_output_spatial_size(
                 + 1
             ),
         )
+    return output_size
 
 
 class SpaceToDepth(nn.Module):

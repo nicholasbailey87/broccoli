@@ -68,12 +68,7 @@ class MHAttention(nn.Module):
         dropout=0.0,
         causal=False,
         seq_len=None,
-        share_kv=False,
         linear_module: nn.Module = nn.Linear,
-        max_subtract=False,
-        d_model_scale=True,
-        log_length_scale=False,
-        quiet=False,
         bos_tokens=0,
         rotary_embedding=None,
         source_size=None,
@@ -89,7 +84,6 @@ class MHAttention(nn.Module):
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
         self.head_dim = self.embed_dim // self.n_heads
-        self.share_kv = share_kv
         self.q_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         if self.share_kv:
@@ -107,10 +101,6 @@ class MHAttention(nn.Module):
                 .unsqueeze(0)
                 .unsqueeze(0),
             )
-        self.max_subtract = max_subtract
-        self.d_model_scale = d_model_scale
-        self.log_length_scale = log_length_scale
-        self.quiet = quiet
         self.rotary_embedding = rotary_embedding
         self.source_size = source_size
         self.bos_tokens = bos_tokens
@@ -218,26 +208,13 @@ class MHAttention(nn.Module):
 
         qk_scores = q @ k.transpose(-1, -2)
 
-        if self.d_model_scale:
-            qk_scores /= math.sqrt(self.head_dim)  # scaling
-
-        if self.log_length_scale:
-            qk_scores *= math.log(qk_scores.size(0))
-
-        if self.max_subtract:
-            max_scores, _ = torch.max(qk_scores, dim=-1, keepdim=True)
-            qk_scores -= max_scores
+        qk_scores /= math.sqrt(self.head_dim)
 
         # Apply mask if causal (must come before softmax)
         if self.causal:
             qk_scores.masked_fill_(self.mask, float("-inf"))
 
-        # Apply softmax and dropout
-        denominator = torch.sum(torch.exp(qk_scores), dim=-1, keepdim=True)
-        if self.quiet:
-            denominator += 1
-        numerator = torch.exp(qk_scores)
-        qk_scores = self.dropout(numerator / denominator)
+        qk_scores = F.softmax(qk_scores, dim=-1)
 
         output_with_heads = qk_scores @ v
 
