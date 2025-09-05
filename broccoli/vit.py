@@ -63,6 +63,7 @@ class CCTEncoder(nn.Module):
         self,
         input_size=(32, 32),
         cnn_in_channels=3,
+        minimum_cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
         cnn_kernel_padding="same",
@@ -155,8 +156,9 @@ class CCTEncoder(nn.Module):
         if pooling_type in ["maxpool", None]:
             cnn_out_channels = transformer_embedding_size
         elif pooling_type == "concat":
-            cnn_out_channels = math.floor(
-                transformer_embedding_size / pooling_kernel_voxels
+            cnn_out_channels = min(
+                math.floor(transformer_embedding_size / pooling_kernel_voxels),
+                minimum_cnn_out_channels,
             )
         else:
             raise NotImplementedError("Pooling type must be maxpool, concat or None")
@@ -301,6 +303,7 @@ class CCT(nn.Module):
         self,
         input_size=(32, 32),
         cnn_in_channels=3,
+        minimum_cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
         cnn_kernel_padding="same",
@@ -350,6 +353,7 @@ class CCT(nn.Module):
         self.encoder = CCTEncoder(
             input_size=input_size,
             cnn_in_channels=cnn_in_channels,
+            minimum_cnn_out_channels=minimum_cnn_out_channels,
             cnn_kernel_size=cnn_kernel_size,
             cnn_kernel_stride=cnn_kernel_stride,
             cnn_kernel_padding=cnn_kernel_padding,
