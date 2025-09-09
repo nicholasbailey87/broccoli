@@ -49,7 +49,7 @@ class SequencePool(nn.Module):
         return self.norm(projection)
 
 
-class CCTEncoder(nn.Module):
+class DCTEncoder(nn.Module):
     """
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
         *''Escaping the Big Data Paradigm with Compact Transformers''*](
@@ -69,20 +69,20 @@ class CCTEncoder(nn.Module):
         cnn_kernel_padding="same",
         cnn_kernel_dilation=1,
         cnn_kernel_groups=1,
-        cnn_activation: nn.Module = nn.ReLU,
+        cnn_activation: nn.Module = ReLU,
         cnn_activation_kwargs: Optional[dict] = None,
         cnn_dropout=0.0,
-        pooling_type="maxpool",
+        pooling_type="concat",  # maxpool or concat
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_kernel_padding=1,
-        transformer_position_embedding="absolute",  # absolute or relative
+        transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
         transformer_bos_tokens=4,
-        transformer_activation: nn.Module = nn.GELU,
+        transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
         mlp_dropout=0.0,
         msa_dropout=0.1,
@@ -291,8 +291,9 @@ class CCTEncoder(nn.Module):
         return self.encoder(x)
 
 
-class CCT(nn.Module):
+class DCT(nn.Module):
     """
+    Denoising convolutional transformer
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
         *''Escaping the Big Data Paradigm with Compact Transformers''*](
         https://arxiv.org/abs/2104.05704). It's a convolutional neural network
@@ -309,20 +310,20 @@ class CCT(nn.Module):
         cnn_kernel_padding="same",
         cnn_kernel_dilation=1,
         cnn_kernel_groups=1,
-        cnn_activation: nn.Module = nn.ReLU,
+        cnn_activation: nn.Module = ReLU,
         cnn_activation_kwargs: Optional[dict] = None,
         cnn_dropout=0.0,
-        pooling_type="maxpool",
+        pooling_type="concat",  # maxpool or concat
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_kernel_padding=1,
-        transformer_position_embedding="absolute",  # absolute or relative
+        transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
         transformer_bos_tokens=4,
-        transformer_activation: nn.Module = nn.GELU,
+        transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
         mlp_dropout=0.0,
         msa_dropout=0.1,
@@ -350,7 +351,7 @@ class CCT(nn.Module):
                 "SwiGLU": SwiGLU,
             }[transformer_activation]
 
-        self.encoder = CCTEncoder(
+        self.encoder = DCTEncoder(
             input_size=input_size,
             cnn_in_channels=cnn_in_channels,
             minimum_cnn_out_channels=minimum_cnn_out_channels,
