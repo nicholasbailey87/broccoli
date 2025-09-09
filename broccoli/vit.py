@@ -66,7 +66,7 @@ class DCTEncoder(nn.Module):
         minimum_cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
-        cnn_kernel_padding="same",
+        cnn_padding="same",
         cnn_kernel_dilation=1,
         cnn_kernel_groups=1,
         cnn_activation: nn.Module = ReLU,
@@ -75,7 +75,7 @@ class DCTEncoder(nn.Module):
         pooling_type="concat",  # maxpool or concat
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
-        pooling_kernel_padding=1,
+        pooling_padding=1,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -131,7 +131,7 @@ class DCTEncoder(nn.Module):
             input_size,
             kernel_size=cnn_kernel_size,
             stride=cnn_kernel_stride,
-            padding=cnn_kernel_padding,
+            padding=cnn_padding,
             dilation=cnn_kernel_dilation,
         )
 
@@ -142,7 +142,7 @@ class DCTEncoder(nn.Module):
                 cnn_output_size,
                 kernel_size=pooling_kernel_size,
                 stride=pooling_kernel_stride,
-                padding=pooling_kernel_padding,
+                padding=pooling_padding,
                 dilation=1,
             )
         )
@@ -174,7 +174,7 @@ class DCTEncoder(nn.Module):
             cnn_out_channels,
             cnn_kernel_size,
             stride=cnn_kernel_stride,
-            padding=cnn_kernel_padding,
+            padding=cnn_padding,
             dilation=cnn_kernel_dilation,
             groups=cnn_kernel_groups,
             bias=True,
@@ -212,7 +212,7 @@ class DCTEncoder(nn.Module):
                     maxpoolxd(
                         pooling_kernel_size,
                         stride=pooling_kernel_stride,
-                        padding=pooling_kernel_padding,
+                        padding=pooling_padding,
                     ),
                     Rearrange(
                         f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
@@ -238,7 +238,7 @@ class DCTEncoder(nn.Module):
                     SpaceToDepth(
                         pooling_kernel_size,
                         stride=pooling_kernel_stride,
-                        padding=pooling_kernel_padding,
+                        padding=pooling_padding,
                         spatial_dimensions=self.spatial_dimensions,
                     ),
                     Rearrange(  # for transformer
@@ -307,7 +307,7 @@ class DCT(nn.Module):
         minimum_cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
-        cnn_kernel_padding="same",
+        cnn_padding="same",
         cnn_kernel_dilation=1,
         cnn_kernel_groups=1,
         cnn_activation: nn.Module = ReLU,
@@ -316,7 +316,7 @@ class DCT(nn.Module):
         pooling_type="concat",  # maxpool or concat
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
-        pooling_kernel_padding=1,
+        pooling_padding=1,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -357,7 +357,7 @@ class DCT(nn.Module):
             minimum_cnn_out_channels=minimum_cnn_out_channels,
             cnn_kernel_size=cnn_kernel_size,
             cnn_kernel_stride=cnn_kernel_stride,
-            cnn_kernel_padding=cnn_kernel_padding,
+            cnn_padding=cnn_padding,
             cnn_kernel_dilation=cnn_kernel_dilation,
             cnn_kernel_groups=cnn_kernel_groups,
             cnn_activation=cnn_activation,
@@ -366,7 +366,7 @@ class DCT(nn.Module):
             pooling_type=pooling_type,
             pooling_kernel_size=pooling_kernel_size,
             pooling_kernel_stride=pooling_kernel_stride,
-            pooling_kernel_padding=pooling_kernel_padding,
+            pooling_padding=pooling_padding,
             transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
