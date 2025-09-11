@@ -27,7 +27,7 @@ class SequencePool(nn.Module):
         as a generalisation of average pooling.
     """
 
-    def __init__(self, d_model, linear_module, out_dim):
+    def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
         super().__init__()
         self.d_model = d_model
         self.attention = nn.Sequential(
@@ -38,7 +38,11 @@ class SequencePool(nn.Module):
             ]
         )
         self.projection = nn.Linear(d_model, out_dim)
-        self.norm = nn.BatchNorm1d(out_dim, affine=False)
+        self.batch_norm = batch_norm
+        if batch_norm:
+            self.norm = nn.BatchNorm1d(out_dim, affine=False)
+        else:
+            self.norm = None
 
     def forward(self, x):
         weights = self.attention(x)
@@ -46,7 +50,7 @@ class SequencePool(nn.Module):
             weights, x, "batch seq, batch seq d_model -> batch d_model"
         )
         projection = self.projection(weighted_embedding)
-        return self.norm(projection)
+        return self.norm(projection) if self.batch_norm else projection
 
 
 class DCTEncoder(nn.Module):
@@ -88,7 +92,7 @@ class DCTEncoder(nn.Module):
         msa_dropout=0.1,
         stochastic_depth=0.1,
         linear_module=nn.Linear,
-        batch_norm=True,
+        initial_batch_norm=True,
     ):
         super().__init__()
 
@@ -191,7 +195,7 @@ class DCTEncoder(nn.Module):
                 nn.Dropout(cnn_dropout),
                 (
                     batchnormxd(cnn_activation_out_channels)
-                    if batch_norm
+                    if initial_batch_norm
                     else nn.Identity()
                 ),
             ]
@@ -279,7 +283,7 @@ class DCTEncoder(nn.Module):
 
         self.encoder = nn.Sequential(
             *[
-                batchnormxd(cnn_in_channels) if batch_norm else nn.Identity(),
+                batchnormxd(cnn_in_channels) if initial_batch_norm else nn.Identity(),
                 self.cnn,
                 self.activate_and_dropout,
                 self.pool,
@@ -328,8 +332,9 @@ class DCT(nn.Module):
         mlp_dropout=0.0,
         msa_dropout=0.1,
         stochastic_depth=0.1,
+        batch_norm_outputs=True,
         linear_module=nn.Linear,
-        batch_norm=True,
+        initial_batch_norm=True,
         image_classes=100,
     ):
 
@@ -379,10 +384,13 @@ class DCT(nn.Module):
             msa_dropout=msa_dropout,
             stochastic_depth=stochastic_depth,
             linear_module=linear_module,
-            batch_norm=batch_norm,
+            initial_batch_norm=initial_batch_norm,
         )
         self.pool = SequencePool(
-            transformer_embedding_size, linear_module, image_classes
+            transformer_embedding_size,
+            linear_module,
+            image_classes,
+            batch_norm=batch_norm_outputs,
         )
 
     @property
