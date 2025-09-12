@@ -160,7 +160,7 @@ class DCTEncoder(nn.Module):
         if pooling_type in ["maxpool", None]:
             cnn_out_channels = transformer_embedding_size
         elif pooling_type == "concat":
-            cnn_out_channels = min(
+            cnn_out_channels = max(
                 math.floor(transformer_embedding_size / pooling_kernel_voxels),
                 minimum_cnn_out_channels,
             )
@@ -333,8 +333,8 @@ class DCT(nn.Module):
         msa_dropout=0.1,
         stochastic_depth=0.1,
         batch_norm_outputs=True,
-        linear_module=nn.Linear,
         initial_batch_norm=True,
+        linear_module=nn.Linear,
         image_classes=100,
     ):
 
