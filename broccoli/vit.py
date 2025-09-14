@@ -215,6 +215,7 @@ class ViTEncoder(nn.Module):
                     ),  # for transformer
                 ]
             )
+            pooling_out_channels = transformer_embedding_size
 
         elif pooling_type == "max":
             self.pool = nn.Sequential(
@@ -229,6 +230,7 @@ class ViTEncoder(nn.Module):
                     ),  # for transformer
                 ]
             )
+            pooling_out_channels = transformer_embedding_size
 
         elif pooling_type == "average":
             self.pool = nn.Sequential(
@@ -243,6 +245,7 @@ class ViTEncoder(nn.Module):
                     ),  # for transformer
                 ]
             )
+            pooling_out_channels = transformer_embedding_size
 
         elif pooling_type == "concat":
 
@@ -253,9 +256,7 @@ class ViTEncoder(nn.Module):
             else:
                 self.concatpool_activation = transformer_activation()
 
-            concatpool_out_channels = (
-                pooling_kernel_voxels * cnn_activation_out_channels
-            )
+            pooling_out_channels = pooling_kernel_voxels * cnn_activation_out_channels
 
             self.pool = nn.Sequential(
                 *[
@@ -267,9 +268,6 @@ class ViTEncoder(nn.Module):
                     ),
                     Rearrange(  # for transformer
                         f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
-                    ),
-                    PadTensor(
-                        (0, transformer_embedding_size - concatpool_out_channels)
                     ),
                 ]
             )
@@ -303,7 +301,7 @@ class ViTEncoder(nn.Module):
                 self.pool,
                 (
                     FeedforwardLayer(
-                        transformer_embedding_size,
+                        pooling_out_channels,
                         transformer_mlp_ratio,
                         transformer_embedding_size,
                         activation=transformer_activation,
