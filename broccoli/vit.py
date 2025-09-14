@@ -1,7 +1,7 @@
 import math
 from typing import Optional
 
-from .transformer import TransformerEncoder, DenoisingAutoEncoder
+from .transformer import TransformerEncoder, FeedforwardLayer
 from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
 from .activation import ReLU, SquaredReLU, GELU, SwiGLU
 from einops import einsum
@@ -53,7 +53,7 @@ class SequencePool(nn.Module):
         return self.norm(projection) if self.batch_norm else projection
 
 
-class DCTEncoder(nn.Module):
+class ViTEncoder(nn.Module):
     """
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
         *''Escaping the Big Data Paradigm with Compact Transformers''*](
@@ -80,6 +80,7 @@ class DCTEncoder(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
+        intermediate_feedforward_layer=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -88,8 +89,8 @@ class DCTEncoder(nn.Module):
         transformer_bos_tokens=0,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
-        mlp_dropout=0.0,
-        msa_dropout=0.1,
+        transformer_mlp_dropout=0.0,
+        transformer_msa_dropout=0.1,
         stochastic_depth=0.1,
         linear_module=nn.Linear,
         initial_batch_norm=True,
@@ -248,14 +249,8 @@ class DCTEncoder(nn.Module):
                     Rearrange(  # for transformer
                         f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                     ),
-                    DenoisingAutoEncoder(
-                        concatpool_out_channels,
-                        transformer_mlp_ratio,
-                        transformer_embedding_size,
-                        activation=transformer_activation,
-                        activation_kwargs=transformer_activation_kwargs,
-                        dropout=0.0,
-                        linear_module=linear_module,
+                    PadTensor(
+                        (0, transformer_embedding_size - concatpool_out_channels)
                     ),
                 ]
             )
@@ -271,8 +266,8 @@ class DCTEncoder(nn.Module):
                 mlp_ratio=transformer_mlp_ratio,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
-                mlp_dropout=mlp_dropout,
-                msa_dropout=msa_dropout,
+                mlp_dropout=transformer_mlp_dropout,
+                msa_dropout=transformer_msa_dropout,
                 stochastic_depth=stochastic_depth,
                 causal=False,
                 linear_module=linear_module,
@@ -287,6 +282,19 @@ class DCTEncoder(nn.Module):
                 self.cnn,
                 self.activate_and_dropout,
                 self.pool,
+                (
+                    FeedforwardLayer(
+                        transformer_embedding_size,
+                        transformer_mlp_ratio,
+                        transformer_embedding_size,
+                        activation=transformer_activation,
+                        activation_kwargs=transformer_activation_kwargs,
+                        dropout=transformer_mlp_dropout,
+                        linear_module=linear_module,
+                    )
+                    if intermediate_feedforward_layer
+                    else nn.Identity()
+                ),
                 self.transformer,
             ]
         )
@@ -295,7 +303,7 @@ class DCTEncoder(nn.Module):
         return self.encoder(x)
 
 
-class DCT(nn.Module):
+class ViT(nn.Module):
     """
     Denoising convolutional transformer
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
@@ -321,6 +329,7 @@ class DCT(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
+        intermediate_feedforward_layer=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -329,8 +338,8 @@ class DCT(nn.Module):
         transformer_bos_tokens=0,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
-        mlp_dropout=0.0,
-        msa_dropout=0.1,
+        transformer_mlp_dropout=0.0,
+        transformer_msa_dropout=0.1,
         stochastic_depth=0.1,
         batch_norm_outputs=True,
         initial_batch_norm=True,
@@ -356,7 +365,7 @@ class DCT(nn.Module):
                 "SwiGLU": SwiGLU,
             }[transformer_activation]
 
-        self.encoder = DCTEncoder(
+        self.encoder = ViTEncoder(
             input_size=input_size,
             cnn_in_channels=cnn_in_channels,
             minimum_cnn_out_channels=minimum_cnn_out_channels,
@@ -372,6 +381,7 @@ class DCT(nn.Module):
             pooling_kernel_size=pooling_kernel_size,
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
+            intermediate_feedforward_layer=intermediate_feedforward_layer,
             transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
@@ -380,8 +390,8 @@ class DCT(nn.Module):
             transformer_bos_tokens=transformer_bos_tokens,
             transformer_activation=transformer_activation,
             transformer_activation_kwargs=transformer_activation_kwargs,
-            mlp_dropout=mlp_dropout,
-            msa_dropout=msa_dropout,
+            mlp_dropout=transformer_mlp_dropout,
+            msa_dropout=transformer_msa_dropout,
             stochastic_depth=stochastic_depth,
             linear_module=linear_module,
             initial_batch_norm=initial_batch_norm,

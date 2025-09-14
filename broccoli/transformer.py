@@ -221,7 +221,7 @@ class MHAttention(nn.Module):
         return self.out_proj(output_without_heads)
 
 
-class DenoisingAutoEncoder(nn.Module):
+class FeedforwardLayer(nn.Module):
     """
     A denoising autoencoder, of the type used in transformer blocks.
     """
@@ -329,7 +329,7 @@ class TransformerBlock(nn.Module):
                     ("layer_norm", nn.LayerNorm(d_model)),
                     (
                         "denoising_autoencoder",
-                        DenoisingAutoEncoder(
+                        FeedforwardLayer(
                             d_model,
                             mlp_ratio,
                             d_model,
