@@ -76,7 +76,7 @@ class ViTEncoder(nn.Module):
         cnn_activation: nn.Module = ReLU,
         cnn_activation_kwargs: Optional[dict] = None,
         cnn_dropout=0.0,
-        pooling_type="concat",  # maxpool or concat
+        pooling_type="concat",  # max, average or concat
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
@@ -114,16 +114,19 @@ class ViTEncoder(nn.Module):
 
         if self.spatial_dimensions == 1:
             maxpoolxd = nn.MaxPool1d
+            avgpoolxd = nn.AvgPool1d
             convxd = nn.Conv1d
             batchnormxd = nn.BatchNorm1d
             spatial_dim_names = "D1"
         elif self.spatial_dimensions == 2:
             maxpoolxd = nn.MaxPool2d
+            avgpoolxd = nn.AvgPool2d
             convxd = nn.Conv2d
             batchnormxd = nn.BatchNorm2d
             spatial_dim_names = "D1 D2"
         elif self.spatial_dimensions == 3:
             maxpoolxd = nn.MaxPool3d
+            avgpoolxd = nn.AvgPool3d
             convxd = nn.Conv3d
             batchnormxd = nn.BatchNorm3d
             spatial_dim_names = "D1 D2 D3"
@@ -158,7 +161,7 @@ class ViTEncoder(nn.Module):
             spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
         )
 
-        if pooling_type in ["maxpool", None]:
+        if pooling_type in ["max", "average", None]:
             cnn_out_channels = transformer_embedding_size
         elif pooling_type == "concat":
             cnn_out_channels = max(
@@ -166,7 +169,9 @@ class ViTEncoder(nn.Module):
                 minimum_cnn_out_channels,
             )
         else:
-            raise NotImplementedError("Pooling type must be maxpool, concat or None")
+            raise NotImplementedError(
+                "Pooling type must be max, average, concat or None"
+            )
 
         cnn_activation_out_channels = cnn_out_channels
 
@@ -211,10 +216,24 @@ class ViTEncoder(nn.Module):
                 ]
             )
 
-        elif pooling_type == "maxpool":
+        elif pooling_type == "max":
             self.pool = nn.Sequential(
                 *[
                     maxpoolxd(
+                        pooling_kernel_size,
+                        stride=pooling_kernel_stride,
+                        padding=pooling_padding,
+                    ),
+                    Rearrange(
+                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
+                    ),  # for transformer
+                ]
+            )
+
+        elif pooling_type == "average":
+            self.pool = nn.Sequential(
+                *[
+                    avgpoolxd(
                         pooling_kernel_size,
                         stride=pooling_kernel_stride,
                         padding=pooling_padding,
@@ -303,7 +322,7 @@ class ViTEncoder(nn.Module):
         return self.encoder(x)
 
 
-class ViT(nn.Module):
+class CCT(nn.Module):
     """
     Denoising convolutional transformer
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
@@ -325,7 +344,7 @@ class ViT(nn.Module):
         cnn_activation: nn.Module = ReLU,
         cnn_activation_kwargs: Optional[dict] = None,
         cnn_dropout=0.0,
-        pooling_type="concat",  # maxpool or concat
+        pooling_type="concat",  # max, average or concat
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,

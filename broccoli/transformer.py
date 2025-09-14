@@ -395,6 +395,7 @@ class TransformerEncoder(nn.Module):
         causal=False,
         linear_module=nn.Linear,
         bos_tokens=0,
+        return_bos_tokens=False,
     ):
         if position_embedding_type == "relative":
             assert source_size is not None  # TODO: make this a proper exception
@@ -403,6 +404,7 @@ class TransformerEncoder(nn.Module):
         self.seq_len = seq_len
         self.n_heads = n_heads
         self._bos_tokens = bos_tokens
+        self.return_bos_tokens = return_bos_tokens
 
         # Initialise BOS tokens with normal init, like usual Pytorch embeddings
         if self._bos_tokens:
@@ -479,7 +481,7 @@ class TransformerEncoder(nn.Module):
         for block in self.blocks:
             x = block(x)
 
-        if self._bos_tokens:
+        if self._bos_tokens and not self.return_bos_tokens:
             return x[:, self._bos_tokens :, :]
         else:
             return x
