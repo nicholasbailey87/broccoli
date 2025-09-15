@@ -269,6 +269,13 @@ class ViTEncoder(nn.Module):
                     Rearrange(  # for transformer
                         f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                     ),
+                    (
+                        PadTensor(
+                            (0, transformer_embedding_size - pooling_out_channels)
+                        )
+                        if not intermediate_feedforward_layer
+                        else nn.Identity()
+                    ),
                 ]
             )
 
