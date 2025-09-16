@@ -223,7 +223,7 @@ class MHAttention(nn.Module):
 
 class FeedforwardLayer(nn.Module):
     """
-    A denoising autoencoder, of the type used in transformer blocks.
+    ...
     """
 
     def __init__(
@@ -247,6 +247,7 @@ class FeedforwardLayer(nn.Module):
 
         self.process = nn.Sequential(
             *[
+                nn.LayerNorm(input_features),
                 linear_module(
                     input_features,
                     (
@@ -256,8 +257,8 @@ class FeedforwardLayer(nn.Module):
                     ),
                 ),
                 self.activation,
-                self.dropout,
                 linear_module(ratio * input_features, output_features),
+                self.dropout,
             ]
         )
 
@@ -323,25 +324,14 @@ class TransformerBlock(nn.Module):
         )
 
         # Submodules for the feedforward process
-        self.ff_process = nn.Sequential(
-            OrderedDict(
-                [
-                    ("layer_norm", nn.LayerNorm(d_model)),
-                    (
-                        "denoising_autoencoder",
-                        FeedforwardLayer(
-                            d_model,
-                            mlp_ratio,
-                            d_model,
-                            activation=activation,
-                            activation_kwargs=activation_kwargs,
-                            dropout=0.0,
-                            linear_module=linear_module,
-                        ),
-                    ),
-                    ("dropout", nn.Dropout(mlp_dropout)),
-                ]
-            )
+        self.ff = FeedforwardLayer(
+            d_model,
+            mlp_ratio,
+            d_model,
+            activation=activation,
+            activation_kwargs=activation_kwargs,
+            dropout=mlp_dropout,
+            linear_module=linear_module,
         )
 
     @property
@@ -366,7 +356,7 @@ class TransformerBlock(nn.Module):
         process_x = process_x + self.attn(
             norm_process_x, norm_process_x, norm_process_x
         )
-        process_x = process_x + self.ff_process(process_x)
+        process_x = process_x + self.ff(process_x)
         x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
 
         return x
