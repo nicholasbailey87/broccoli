@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from .rope import RotaryEmbedding, apply_rotary_emb
+from .linear import SpectralNormLinear
 
 
 class MHAttention(nn.Module):
@@ -235,6 +236,7 @@ class FeedforwardLayer(nn.Module):
         activation_kwargs=None,
         dropout=0.0,
         linear_module=nn.Linear,
+        norm_memory=False,
     ):
         super().__init__()
 
@@ -245,19 +247,28 @@ class FeedforwardLayer(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
+        self.max_features = (
+            2 * ratio * output_features
+            if activation.__name__.endswith("GLU")
+            else ratio * output_features
+        )
+
+        if norm_memory:
+            self.memory_type = SpectralNormLinear
+            self.bias_memories = False
+        else:
+            self.memory_type = linear_module
+            self.bias_memories = True
+
         self.process = nn.Sequential(
             *[
                 nn.LayerNorm(input_features),
-                linear_module(
-                    input_features,
-                    (
-                        2 * ratio * output_features
-                        if activation.__name__.endswith("GLU")
-                        else ratio * output_features
-                    ),
-                ),
+                linear_module(input_features, self.max_features),
                 self.activation,
-                linear_module(ratio * output_features, output_features),
+                nn.LayerNorm(self.max_features),
+                self.memory_type(
+                    ratio * output_features, output_features, bias=self.bias_memories
+                ),
                 self.dropout,
             ]
         )

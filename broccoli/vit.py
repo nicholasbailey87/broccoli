@@ -82,6 +82,7 @@ class ViTEncoder(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         intermediate_feedforward_layer=True,
+        norm_intermediate_ff_memory=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -263,6 +264,7 @@ class ViTEncoder(nn.Module):
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
+                norm_memory=norm_intermediate_ff_memory,
             )
         elif pooling_out_channels < transformer_embedding_size:
             self.intermediate_feedforward_layer = nn.Identity()
@@ -326,6 +328,7 @@ class CCT(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         intermediate_feedforward_layer=True,
+        norm_intermediate_ff_memory=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
