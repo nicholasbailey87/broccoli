@@ -233,6 +233,7 @@ class FeedforwardLayer(nn.Module):
         output_features,
         activation=nn.ReLU,
         activation_kwargs=None,
+        layer_norm=True,
         dropout=0.0,
         linear_module=nn.Linear,
     ):
@@ -247,7 +248,7 @@ class FeedforwardLayer(nn.Module):
 
         self.process = nn.Sequential(
             *[
-                nn.LayerNorm(input_features),
+                nn.LayerNorm(input_features) if layer_norm else nn.Identity(),
                 linear_module(
                     input_features,
                     (

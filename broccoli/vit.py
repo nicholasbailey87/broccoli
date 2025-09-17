@@ -261,6 +261,7 @@ class ViTEncoder(nn.Module):
                 transformer_embedding_size,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
+                layer_norm=False,  # rely on initial batch_norm
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
             )
