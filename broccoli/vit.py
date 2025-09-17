@@ -66,8 +66,9 @@ class ViTEncoder(nn.Module):
     def __init__(
         self,
         input_size=(32, 32),
+        cnn=True,
         cnn_in_channels=3,
-        minimum_cnn_out_channels=16,
+        cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
         cnn_padding="same",
@@ -135,12 +136,49 @@ class ViTEncoder(nn.Module):
                 "`input_size` must be a tuple of length 1, 2, or 3."
             )
 
-        cnn_output_size = calculate_output_spatial_size(
-            input_size,
-            kernel_size=cnn_kernel_size,
-            stride=cnn_kernel_stride,
-            padding=cnn_padding,
-            dilation=cnn_kernel_dilation,
+        if cnn:
+            cnn_output_size = calculate_output_spatial_size(
+                input_size,
+                kernel_size=cnn_kernel_size,
+                stride=cnn_kernel_stride,
+                padding=cnn_padding,
+                dilation=cnn_kernel_dilation,
+            )
+            self.cnn = convxd(
+                cnn_in_channels,
+                cnn_out_channels,
+                cnn_kernel_size,
+                stride=cnn_kernel_stride,
+                padding=cnn_padding,
+                dilation=cnn_kernel_dilation,
+                groups=cnn_kernel_groups,
+                bias=True,
+                padding_mode="zeros",
+            )
+            cnn_activation_out_channels = cnn_out_channels
+            self.activate_and_dropout = nn.Sequential(
+                *[
+                    Rearrange(  # rearrange in case we're using XGLU activation
+                        f"N C {spatial_dim_names} -> N {spatial_dim_names} C"
+                    ),
+                    self.cnn_activation,
+                    Rearrange(f"N {spatial_dim_names} C -> N C {spatial_dim_names}"),
+                    nn.Dropout(cnn_dropout),
+                    batchnormxd(cnn_activation_out_channels),
+                ]
+            )
+            # This block rhymes:
+            if cnn and cnn_activation.__name__.endswith("GLU"):
+                cnn_out_channels *= 2
+        else:
+            self.cnn = nn.Identity()
+            self.activate_and_dropout = nn.Identity()
+            cnn_output_size = input_size
+            cnn_out_channels = cnn_in_channels
+            cnn_activation_out_channels = cnn_in_channels
+
+        pooling_kernel_voxels = math.prod(
+            spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
         )
 
         pooling_output_size = (
@@ -155,129 +193,44 @@ class ViTEncoder(nn.Module):
             )
         )
 
-        self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
+        if pooling_type is None:
+            pooling_out_channels = cnn_activation_out_channels
+            self.pool = nn.Sequential(
+                *[
+                    Rearrange(
+                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
+                    ),  # for transformer
+                ]
+            )
 
-        pooling_kernel_voxels = math.prod(
-            spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
-        )
-
-        if pooling_type in ["max", "average", None]:
-            cnn_out_channels = transformer_embedding_size
+        elif pooling_type == "max":
+            pooling_out_channels = cnn_activation_out_channels
+            self.pool = maxpoolxd(
+                pooling_kernel_size,
+                stride=pooling_kernel_stride,
+                padding=pooling_padding,
+            )
+        elif pooling_type == "average":
+            pooling_out_channels = cnn_activation_out_channels
+            self.pool = avgpoolxd(
+                pooling_kernel_size,
+                stride=pooling_kernel_stride,
+                padding=pooling_padding,
+            )
         elif pooling_type == "concat":
-            cnn_out_channels = max(
-                math.floor(transformer_embedding_size / pooling_kernel_voxels),
-                minimum_cnn_out_channels,
+            pooling_out_channels = pooling_kernel_voxels * cnn_activation_out_channels
+            self.pool = SpaceToDepth(
+                pooling_kernel_size,
+                stride=pooling_kernel_stride,
+                padding=pooling_padding,
+                spatial_dimensions=self.spatial_dimensions,
             )
         else:
             raise NotImplementedError(
                 "Pooling type must be max, average, concat or None"
             )
 
-        cnn_activation_out_channels = cnn_out_channels
-
-        # This block rhymes:
-        if cnn_activation.__name__.endswith("GLU"):
-            cnn_out_channels *= 2
-
-        self.cnn = convxd(
-            cnn_in_channels,
-            cnn_out_channels,
-            cnn_kernel_size,
-            stride=cnn_kernel_stride,
-            padding=cnn_padding,
-            dilation=cnn_kernel_dilation,
-            groups=cnn_kernel_groups,
-            bias=True,
-            padding_mode="zeros",
-        )
-
-        self.activate_and_dropout = nn.Sequential(
-            *[
-                Rearrange(  # rearrange in case we're using XGLU activation
-                    f"N C {spatial_dim_names} -> N {spatial_dim_names} C"
-                ),
-                self.cnn_activation,
-                Rearrange(f"N {spatial_dim_names} C -> N C {spatial_dim_names}"),
-                nn.Dropout(cnn_dropout),
-                (
-                    batchnormxd(cnn_activation_out_channels)
-                    if initial_batch_norm
-                    else nn.Identity()
-                ),
-            ]
-        )
-
-        if pooling_type is None:
-            self.pool = nn.Sequential(
-                *[
-                    Rearrange(
-                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
-                    ),  # for transformer
-                ]
-            )
-            pooling_out_channels = transformer_embedding_size
-
-        elif pooling_type == "max":
-            self.pool = nn.Sequential(
-                *[
-                    maxpoolxd(
-                        pooling_kernel_size,
-                        stride=pooling_kernel_stride,
-                        padding=pooling_padding,
-                    ),
-                    Rearrange(
-                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
-                    ),  # for transformer
-                ]
-            )
-            pooling_out_channels = transformer_embedding_size
-
-        elif pooling_type == "average":
-            self.pool = nn.Sequential(
-                *[
-                    avgpoolxd(
-                        pooling_kernel_size,
-                        stride=pooling_kernel_stride,
-                        padding=pooling_padding,
-                    ),
-                    Rearrange(
-                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
-                    ),  # for transformer
-                ]
-            )
-            pooling_out_channels = transformer_embedding_size
-
-        elif pooling_type == "concat":
-
-            if transformer_activation_kwargs is not None:
-                self.concatpool_activation = transformer_activation(
-                    **transformer_activation_kwargs
-                )
-            else:
-                self.concatpool_activation = transformer_activation()
-
-            pooling_out_channels = pooling_kernel_voxels * cnn_activation_out_channels
-
-            self.pool = nn.Sequential(
-                *[
-                    SpaceToDepth(
-                        pooling_kernel_size,
-                        stride=pooling_kernel_stride,
-                        padding=pooling_padding,
-                        spatial_dimensions=self.spatial_dimensions,
-                    ),
-                    Rearrange(  # for transformer
-                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
-                    ),
-                    (
-                        PadTensor(
-                            (0, transformer_embedding_size - pooling_out_channels)
-                        )
-                        if not intermediate_feedforward_layer
-                        else nn.Identity()
-                    ),
-                ]
-            )
+        self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
         if transformer_layers > 0:
             self.transformer = TransformerEncoder(
@@ -300,25 +253,43 @@ class ViTEncoder(nn.Module):
         else:
             self.transformer = nn.Identity()
 
+        if intermediate_feedforward_layer:
+            self.pooling_channels_padding = nn.Identity()
+            self.intermediate_feedforward_layer = FeedforwardLayer(
+                pooling_out_channels,
+                transformer_mlp_ratio,
+                transformer_embedding_size,
+                activation=transformer_activation,
+                activation_kwargs=transformer_activation_kwargs,
+                dropout=transformer_mlp_dropout,
+                linear_module=linear_module,
+            )
+        elif pooling_out_channels < transformer_embedding_size:
+            self.intermediate_feedforward_layer = nn.Identity()
+            self.pooling_channels_padding = PadTensor(
+                (0, transformer_embedding_size - pooling_out_channels)
+            )
+        else:
+            raise NotImplementedError(
+                "In a situation where the choice/parameters of the pooling and the"
+                + " `cnn_out_channels` (or the number of `input_channels` if"
+                + " `cnn`=False) means that the pooling will result"
+                + " in more channels per pixel/voxel than the size of the"
+                + " intended transformer embedding,"
+                + " `intermediate_feedforward_layer` must be set to True"
+            )
+
         self.encoder = nn.Sequential(
             *[
                 batchnormxd(cnn_in_channels) if initial_batch_norm else nn.Identity(),
                 self.cnn,
                 self.activate_and_dropout,
                 self.pool,
-                (
-                    FeedforwardLayer(
-                        pooling_out_channels,
-                        transformer_mlp_ratio,
-                        transformer_embedding_size,
-                        activation=transformer_activation,
-                        activation_kwargs=transformer_activation_kwargs,
-                        dropout=transformer_mlp_dropout,
-                        linear_module=linear_module,
-                    )
-                    if intermediate_feedforward_layer
-                    else nn.Identity()
+                Rearrange(  # for transformer
+                    f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
+                self.pooling_channels_padding,
+                self.intermediate_feedforward_layer,
                 self.transformer,
             ]
         )
@@ -339,6 +310,7 @@ class CCT(nn.Module):
     def __init__(
         self,
         input_size=(32, 32),
+        cnn=True,
         cnn_in_channels=3,
         minimum_cnn_out_channels=16,
         cnn_kernel_size=3,
@@ -391,6 +363,7 @@ class CCT(nn.Module):
 
         self.encoder = ViTEncoder(
             input_size=input_size,
+            cnn=cnn,
             cnn_in_channels=cnn_in_channels,
             minimum_cnn_out_channels=minimum_cnn_out_channels,
             cnn_kernel_size=cnn_kernel_size,
