@@ -251,13 +251,13 @@ class FeedforwardLayer(nn.Module):
                 linear_module(
                     input_features,
                     (
-                        2 * ratio * input_features
+                        2 * ratio * output_features
                         if activation.__name__.endswith("GLU")
-                        else ratio * input_features
+                        else ratio * output_features
                     ),
                 ),
                 self.activation,
-                linear_module(ratio * input_features, output_features),
+                linear_module(ratio * output_features, output_features),
                 self.dropout,
             ]
         )
