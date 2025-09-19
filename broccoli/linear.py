@@ -37,7 +37,7 @@ class SpectralNormLinear(nn.Module):
     def reset_parameters(self) -> None:
         nn.init.kaiming_uniform_(self.weight_init, a=math.sqrt(5))
         if self.use_bias:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weights)
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight_init)
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
             nn.init.uniform_(self.bias, -bound, bound)
         self.weights = SigmaReparamTensor(self.weight_init)
