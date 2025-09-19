@@ -20,16 +20,17 @@ class PadTensor(nn.Module):
         return F.pad(x, *self.args, **self.kwargs)
 
 
-class SequencePool(nn.Module):
-    """
-    As described in [Hasani et al. (2021) *''Escaping the Big Data Paradigm with
-        Compact Transformers''*](https://arxiv.org/abs/2104.05704). It can be viewed
-        as a generalisation of average pooling.
-    """
-
-    def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
+class GetCLSToken(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.d_model = d_model
+
+    def forward(self, x):
+        return x[:, 0, :]
+
+
+class SequencePool(nn.Module):
+    def __init__(self, d_model, linear_module):
+        super().__init__()
         self.attention = nn.Sequential(
             *[
                 linear_module(d_model, 1),
@@ -37,20 +38,56 @@ class SequencePool(nn.Module):
                 nn.Softmax(dim=-1),
             ]
         )
-        self.projection = nn.Linear(d_model, out_dim)
-        self.batch_norm = batch_norm
-        if batch_norm:
-            self.norm = nn.BatchNorm1d(out_dim, affine=False)
-        else:
-            self.norm = None
 
     def forward(self, x):
         weights = self.attention(x)
-        weighted_embedding = einsum(
-            weights, x, "batch seq, batch seq d_model -> batch d_model"
+        return einsum(weights, x, "batch seq, batch seq d_model -> batch d_model")
+
+
+class ClassificationHead(nn.Module):
+    """
+    A general classification head for a ViT
+    """
+
+    def __init__(self, d_model, linear_module, n_classes, batch_norm=True):
+        super().__init__()
+        self.d_model = d_model
+        self.summarize = GetCLSToken()
+        self.process = nn.Sequential(
+            *[
+                linear_module(d_model, 1),
+                Rearrange("batch seq 1 -> batch seq"),
+                nn.Softmax(dim=-1),
+            ]
         )
-        projection = self.projection(weighted_embedding)
-        return self.norm(projection) if self.batch_norm else projection
+        self.projection = nn.Linear(d_model, n_classes)
+        if batch_norm:
+            self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
+        else:
+            self.batch_norm = nn.Identity()
+
+        self.classification_process = nn.Sequential(
+            *[
+                self.summarize,
+                self.projection,
+                self.batch_norm,
+            ]
+        )
+
+    def forward(self, x):
+        return self.classification_process(x)
+
+
+class SequencePoolClassificationHead(ClassificationHead):
+    """
+    As described in [Hasani et al. (2021) *''Escaping the Big Data Paradigm with
+        Compact Transformers''*](https://arxiv.org/abs/2104.05704). It can be viewed
+        as a generalisation of average pooling.
+    """
+
+    def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
+        super().__init__(d_model, linear_module, out_dim, batch_norm=True)
+        self.summarize = SequencePool()
 
 
 class ViTEncoder(nn.Module):
@@ -82,13 +119,13 @@ class ViTEncoder(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         intermediate_feedforward_layer=True,
-        norm_intermediate_ff_memory=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
         transformer_bos_tokens=0,
+        transformer_return_bos_tokens=False,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
         transformer_mlp_dropout=0.0,
@@ -250,6 +287,7 @@ class ViTEncoder(nn.Module):
                 causal=False,
                 linear_module=linear_module,
                 bos_tokens=transformer_bos_tokens,
+                return_bos_tokens=transformer_return_bos_tokens,
             )
         else:
             self.transformer = nn.Identity()
@@ -264,7 +302,6 @@ class ViTEncoder(nn.Module):
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
-                norm_memory=norm_intermediate_ff_memory,
             )
         elif pooling_out_channels < transformer_embedding_size:
             self.intermediate_feedforward_layer = nn.Identity()
@@ -300,7 +337,7 @@ class ViTEncoder(nn.Module):
         return self.encoder(x)
 
 
-class CCT(nn.Module):
+class ViT(nn.Module):
     """
     Denoising convolutional transformer
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
@@ -328,13 +365,13 @@ class CCT(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         intermediate_feedforward_layer=True,
-        norm_intermediate_ff_memory=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
         transformer_bos_tokens=0,
+        transformer_return_bos_tokens=False,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
         transformer_mlp_dropout=0.0,
@@ -344,6 +381,7 @@ class CCT(nn.Module):
         initial_batch_norm=True,
         linear_module=nn.Linear,
         image_classes=100,
+        head=SequencePoolClassificationHead,
     ):
 
         super().__init__()
@@ -388,6 +426,7 @@ class CCT(nn.Module):
             transformer_heads=transformer_heads,
             transformer_mlp_ratio=transformer_mlp_ratio,
             transformer_bos_tokens=transformer_bos_tokens,
+            transformer_return_bos_tokens=transformer_return_bos_tokens,
             transformer_activation=transformer_activation,
             transformer_activation_kwargs=transformer_activation_kwargs,
             transformer_mlp_dropout=transformer_mlp_dropout,
@@ -396,7 +435,8 @@ class CCT(nn.Module):
             linear_module=linear_module,
             initial_batch_norm=initial_batch_norm,
         )
-        self.pool = SequencePool(
+
+        self.pool = head(
             transformer_embedding_size,
             linear_module,
             image_classes,
