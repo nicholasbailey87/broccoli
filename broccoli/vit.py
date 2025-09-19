@@ -305,7 +305,7 @@ class ViTEncoder(nn.Module):
                 linear_module=linear_module,
             )
         elif pooling_out_channels == transformer_embedding_size:
-            pass
+            self.pooling_channels_padding = nn.Identity()
         elif pooling_out_channels < transformer_embedding_size:
             self.intermediate_feedforward_layer = nn.Identity()
             self.pooling_channels_padding = PadTensor(
