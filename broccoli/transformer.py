@@ -222,7 +222,7 @@ class MHAttention(nn.Module):
         return self.out_proj(output_without_heads)
 
 
-class FeedforwardLayer(nn.Module):
+class FeedforwardBlock(nn.Module):
     """
     ...
     """
@@ -324,7 +324,7 @@ class TransformerBlock(nn.Module):
         )
 
         # Submodules for the feedforward process
-        self.ff = FeedforwardLayer(
+        self.ff = FeedforwardBlock(
             d_model,
             mlp_ratio,
             d_model,

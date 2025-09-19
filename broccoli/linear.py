@@ -10,7 +10,8 @@ from .tensor import SigmaReparamTensor
 
 class SpectralNormLinear(nn.Module):
     """
-    ...
+    Inspired by Apple's Spectral Normed Linear Layers
+        (https://github.com/apple/ml-sigma-reparam)
     """
 
     def __init__(self, in_features: int, out_features: int, bias: bool = True):

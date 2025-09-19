@@ -1,9 +1,10 @@
 import math
 from typing import Optional
 
-from .transformer import TransformerEncoder, FeedforwardLayer
+from .transformer import TransformerEncoder, FeedforwardBlock
 from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
 from .activation import ReLU, SquaredReLU, GELU, SwiGLU
+from .linear import SpectralNormLinear
 from einops import einsum
 from einops.layers.torch import Rearrange
 import torch.nn as nn
@@ -103,6 +104,7 @@ class ViTEncoder(nn.Module):
     def __init__(
         self,
         input_size=(32, 32),
+        initial_batch_norm=True,
         cnn=True,
         cnn_in_channels=3,
         cnn_out_channels=16,
@@ -132,7 +134,6 @@ class ViTEncoder(nn.Module):
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         linear_module=nn.Linear,
-        initial_batch_norm=True,
     ):
         super().__init__()
 
@@ -294,7 +295,7 @@ class ViTEncoder(nn.Module):
 
         if intermediate_feedforward_layer:
             self.pooling_channels_padding = nn.Identity()
-            self.intermediate_feedforward_layer = FeedforwardLayer(
+            self.intermediate_feedforward_layer = FeedforwardBlock(
                 pooling_out_channels,
                 transformer_mlp_ratio,
                 transformer_embedding_size,
@@ -349,6 +350,8 @@ class ViT(nn.Module):
     def __init__(
         self,
         input_size=(32, 32),
+        image_classes=100,
+        initial_batch_norm=True,
         cnn=True,
         cnn_in_channels=3,
         cnn_out_channels=16,
@@ -378,9 +381,7 @@ class ViT(nn.Module):
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         batch_norm_outputs=True,
-        initial_batch_norm=True,
-        linear_module=nn.Linear,
-        image_classes=100,
+        linear_module=SpectralNormLinear,
         head=SequencePoolClassificationHead,
     ):
 
@@ -404,6 +405,7 @@ class ViT(nn.Module):
 
         self.encoder = ViTEncoder(
             input_size=input_size,
+            initial_batch_norm=initial_batch_norm,
             cnn=cnn,
             cnn_in_channels=cnn_in_channels,
             cnn_out_channels=cnn_out_channels,
@@ -433,7 +435,6 @@ class ViT(nn.Module):
             transformer_msa_dropout=transformer_msa_dropout,
             transformer_stochastic_depth=transformer_stochastic_depth,
             linear_module=linear_module,
-            initial_batch_norm=initial_batch_norm,
         )
 
         self.pool = head(
