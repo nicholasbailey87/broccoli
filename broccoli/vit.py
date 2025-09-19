@@ -304,6 +304,8 @@ class ViTEncoder(nn.Module):
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
             )
+        elif pooling_out_channels == transformer_embedding_size:
+            pass
         elif pooling_out_channels < transformer_embedding_size:
             self.intermediate_feedforward_layer = nn.Identity()
             self.pooling_channels_padding = PadTensor(
