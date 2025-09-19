@@ -257,7 +257,6 @@ class FeedforwardBlock(nn.Module):
                 nn.LayerNorm(input_features),
                 linear_module(input_features, self.max_features),
                 self.activation,
-                nn.LayerNorm(self.max_features),
                 linear_module(ratio * output_features, output_features, bias=False),
                 self.dropout,
             ]
