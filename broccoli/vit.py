@@ -88,7 +88,7 @@ class SequencePoolClassificationHead(ClassificationHead):
 
     def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
         super().__init__(d_model, linear_module, out_dim, batch_norm=True)
-        self.summarize = SequencePool()
+        self.summarize = SequencePool(d_model, linear_module)
 
 
 class ViTEncoder(nn.Module):
