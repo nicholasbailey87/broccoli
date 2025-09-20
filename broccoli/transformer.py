@@ -258,9 +258,7 @@ class FeedforwardBlock(nn.Module):
                 linear_module(input_features, self.max_features),
                 self.activation,
                 nn.LayerNorm(ratio * output_features),
-                SpectralNormLinear(
-                    ratio * output_features, output_features, bias=False
-                ),
+                linear_module(ratio * output_features, output_features, bias=False),
                 self.dropout,
             ]
         )
