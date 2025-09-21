@@ -236,6 +236,7 @@ class FeedforwardBlock(nn.Module):
         activation_kwargs=None,
         dropout=0.0,
         linear_module=nn.Linear,
+        regularise_values=True,
     ):
         super().__init__()
 
@@ -252,13 +253,22 @@ class FeedforwardBlock(nn.Module):
             else ratio * output_features
         )
 
+        if regularise_values:
+            self.memory_type = SpectralNormLinear
+            self.bias_memories = False
+        else:
+            self.memory_type = nn.Linear
+            self.bias_memories = True
+
         self.process = nn.Sequential(
             *[
                 nn.LayerNorm(input_features),
                 linear_module(input_features, self.max_features),
                 self.activation,
                 nn.LayerNorm(ratio * output_features),
-                linear_module(ratio * output_features, output_features),
+                self.memory_type(
+                    ratio * output_features, output_features, bias=self.bias_memories
+                ),
                 self.dropout,
             ]
         )
