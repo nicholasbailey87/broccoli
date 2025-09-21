@@ -260,10 +260,10 @@ class FeedforwardBlock(nn.Module):
 
         self.process = nn.Sequential(
             *[
-                nn.LayerNorm(input_features),
+                # nn.LayerNorm(input_features),
                 linear_module(input_features, self.max_features),
                 self.activation,
-                nn.LayerNorm(ratio * output_features),
+                # nn.LayerNorm(ratio * output_features),
                 self.memory_type(ratio * output_features, output_features),
                 self.dropout,
             ]
