@@ -18,7 +18,10 @@ class PadTensor(nn.Module):
         self.kwargs = kwargs
 
     def forward(self, x):
-        return F.pad(x, *self.args, **self.kwargs)
+        if sum(self.args[0]) == 0:
+            return x
+        else:
+            return F.pad(x, *self.args, **self.kwargs)
 
 
 class GetCLSToken(nn.Module):
@@ -97,9 +100,9 @@ class ViTEncoder(nn.Module):
     def __init__(
         self,
         input_size=(32, 32),
+        in_channels=3,
         initial_batch_norm=True,
         cnn=True,
-        cnn_in_channels=3,
         cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
@@ -113,7 +116,7 @@ class ViTEncoder(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
-        intermediate_feedforward_layer=True,
+        transformer_feedforward_first=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -180,7 +183,7 @@ class ViTEncoder(nn.Module):
                 dilation=cnn_kernel_dilation,
             )
             self.cnn = convxd(
-                cnn_in_channels,
+                in_channels,
                 cnn_out_channels,
                 cnn_kernel_size,
                 stride=cnn_kernel_stride,
@@ -206,8 +209,8 @@ class ViTEncoder(nn.Module):
             self.cnn = nn.Identity()
             self.activate_and_dropout = nn.Identity()
             cnn_output_size = input_size
-            cnn_out_channels = cnn_in_channels
-            cnn_activation_out_channels = cnn_in_channels
+            cnn_out_channels = in_channels
+            cnn_activation_out_channels = in_channels
 
         pooling_kernel_voxels = math.prod(
             spatial_tuple(pooling_kernel_size, self.spatial_dimensions)
@@ -262,6 +265,10 @@ class ViTEncoder(nn.Module):
                 "Pooling type must be max, average, concat or None"
             )
 
+        self.pooling_channels_padding = PadTensor(
+            (0, max(0, transformer_embedding_size - pooling_out_channels))
+        )
+
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
         if transformer_layers > 0:
@@ -286,38 +293,23 @@ class ViTEncoder(nn.Module):
         else:
             self.transformer = nn.Identity()
 
-        if intermediate_feedforward_layer:
-            self.pooling_channels_padding = nn.Identity()
-            self.intermediate_feedforward_layer = FeedforwardBlock(
-                pooling_out_channels,
+        if transformer_feedforward_first:
+            self.initial_ff = FeedforwardBlock(
+                transformer_embedding_size,
                 transformer_mlp_ratio,
                 transformer_embedding_size,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
-            )
-        elif pooling_out_channels == transformer_embedding_size:
-            self.intermediate_feedforward_layer = nn.Identity()
-            self.pooling_channels_padding = nn.Identity()
-        elif pooling_out_channels < transformer_embedding_size:
-            self.intermediate_feedforward_layer = nn.Identity()
-            self.pooling_channels_padding = PadTensor(
-                (0, transformer_embedding_size - pooling_out_channels)
+                sigma_reparam=True,
             )
         else:
-            raise NotImplementedError(
-                "In a situation where the choice/parameters of the pooling and the"
-                + " `cnn_out_channels` (or the number of `input_channels` if"
-                + " `cnn`=False) means that the pooling will result"
-                + " in more channels per pixel/voxel than the size of the"
-                + " intended transformer embedding,"
-                + " `intermediate_feedforward_layer` must be set to True"
-            )
+            self.initial_ff = nn.Identity()
 
         self.encoder = nn.Sequential(
             *[
-                batchnormxd(cnn_in_channels) if initial_batch_norm else nn.Identity(),
+                batchnormxd(in_channels) if initial_batch_norm else nn.Identity(),
                 self.cnn,
                 self.activate_and_dropout,
                 self.pool,
@@ -325,7 +317,7 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.pooling_channels_padding,
-                self.intermediate_feedforward_layer,
+                self.initial_ff,
                 self.transformer,
             ]
         )
@@ -347,9 +339,9 @@ class ViT(nn.Module):
         self,
         input_size=(32, 32),
         image_classes=100,
+        in_channels=3,
         initial_batch_norm=True,
         cnn=True,
-        cnn_in_channels=3,
         cnn_out_channels=16,
         cnn_kernel_size=3,
         cnn_kernel_stride=1,
@@ -363,7 +355,7 @@ class ViT(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
-        intermediate_feedforward_layer=True,
+        transformer_feedforward_first=True,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -402,8 +394,8 @@ class ViT(nn.Module):
         self.encoder = ViTEncoder(
             input_size=input_size,
             initial_batch_norm=initial_batch_norm,
+            in_channels=in_channels,
             cnn=cnn,
-            cnn_in_channels=cnn_in_channels,
             cnn_out_channels=cnn_out_channels,
             cnn_kernel_size=cnn_kernel_size,
             cnn_kernel_stride=cnn_kernel_stride,
@@ -417,7 +409,7 @@ class ViT(nn.Module):
             pooling_kernel_size=pooling_kernel_size,
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
-            intermediate_feedforward_layer=intermediate_feedforward_layer,
+            transformer_feedforward_first=transformer_feedforward_first,
             transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
