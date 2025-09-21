@@ -32,7 +32,7 @@ class SigmaReparamTensor(nn.Module):
                 approx_right_singular_transpose, dim=0
             )
             updated_right_singular = self.tensor.T.mv(approx_right_singular_transpose)
-            updated_right_singular = F.normalize(self.right_singular, dim=0)
+            updated_right_singular = F.normalize(updated_right_singular, dim=0)
             self.right_singular.data.copy_(updated_right_singular)
             rayleigh_quotient = torch.einsum(
                 "m,mn,n->",

@@ -176,6 +176,9 @@ class ViTEncoder(nn.Module):
             )
 
         if cnn:
+            # This block rhymes:
+            if cnn_activation.__name__.endswith("GLU"):
+                cnn_out_channels *= 2
             cnn_output_size = calculate_output_spatial_size(
                 input_size,
                 kernel_size=cnn_kernel_size,
@@ -206,9 +209,6 @@ class ViTEncoder(nn.Module):
                     batchnormxd(cnn_activation_out_channels),
                 ]
             )
-            # This block rhymes:
-            if cnn and cnn_activation.__name__.endswith("GLU"):
-                cnn_out_channels *= 2
         else:
             self.cnn = nn.Identity()
             self.activate_and_dropout = nn.Identity()
