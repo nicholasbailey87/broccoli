@@ -255,10 +255,8 @@ class FeedforwardBlock(nn.Module):
 
         if regularise_values:
             self.memory_type = SpectralNormLinear
-            self.bias_memories = False
         else:
             self.memory_type = nn.Linear
-            self.bias_memories = True
 
         self.process = nn.Sequential(
             *[
@@ -266,9 +264,7 @@ class FeedforwardBlock(nn.Module):
                 linear_module(input_features, self.max_features),
                 self.activation,
                 nn.LayerNorm(ratio * output_features),
-                self.memory_type(
-                    ratio * output_features, output_features, bias=self.bias_memories
-                ),
+                self.memory_type(ratio * output_features, output_features),
                 self.dropout,
             ]
         )

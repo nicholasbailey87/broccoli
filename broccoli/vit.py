@@ -30,7 +30,7 @@ class GetCLSToken(nn.Module):
 
 
 class SequencePool(nn.Module):
-    def __init__(self, d_model, linear_module):
+    def __init__(self, d_model, linear_module=nn.Linear):
         super().__init__()
         self.attention = nn.Sequential(
             *[
@@ -54,13 +54,6 @@ class ClassificationHead(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.summarize = GetCLSToken()
-        self.process = nn.Sequential(
-            *[
-                linear_module(d_model, 1),
-                Rearrange("batch seq 1 -> batch seq"),
-                nn.Softmax(dim=-1),
-            ]
-        )
         self.projection = nn.Linear(d_model, n_classes)
         if batch_norm:
             self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
@@ -87,7 +80,7 @@ class SequencePoolClassificationHead(ClassificationHead):
     """
 
     def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
-        super().__init__(d_model, linear_module, out_dim, batch_norm=True)
+        super().__init__(d_model, linear_module, out_dim, batch_norm=batch_norm)
         self.summarize = SequencePool(d_model, linear_module)
 
 
