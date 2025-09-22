@@ -295,14 +295,14 @@ class ViTEncoder(nn.Module):
 
         if transformer_feedforward_first:
             self.initial_ff = FeedforwardBlock(
-                transformer_embedding_size,
+                max(transformer_embedding_size, pooling_out_channels),
                 transformer_mlp_ratio,
                 transformer_embedding_size,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
-                sigma_reparam=not cnn,
+                reparam=not cnn,
             )
         else:
             self.initial_ff = nn.Identity()

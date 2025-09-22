@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from .rope import RotaryEmbedding, apply_rotary_emb
-from .linear import SpectralNormLinear
+from .linear import AnchoredLinear
 
 
 class MHAttention(nn.Module):
@@ -236,7 +236,7 @@ class FeedforwardBlock(nn.Module):
         activation_kwargs=None,
         dropout=0.0,
         linear_module=nn.Linear,
-        sigma_reparam=False,
+        reparam=False,
     ):
         super().__init__()
 
@@ -253,8 +253,8 @@ class FeedforwardBlock(nn.Module):
             else ratio * output_features
         )
 
-        if sigma_reparam:
-            self.memory_type = SpectralNormLinear
+        if reparam:
+            self.memory_type = AnchoredLinear
         else:
             self.memory_type = linear_module
 
@@ -263,7 +263,7 @@ class FeedforwardBlock(nn.Module):
                 nn.LayerNorm(input_features),
                 linear_module(input_features, self.max_features),
                 self.activation,
-                nn.LayerNorm(ratio * output_features),
+                # nn.LayerNorm(ratio * output_features),
                 self.memory_type(ratio * output_features, output_features),
                 self.dropout,
             ]
