@@ -76,21 +76,27 @@ class AnchoredReparamTensor(nn.Module):
         assert init_tensor.ndim == 2, "Input tensor must be a 2D matrix."
         super().__init__()
 
-        self.weight = nn.Parameter(init_tensor.clone(), requires_grad=True)
+        # Use the gradboard convention of calling something nondecay_* if we should
+        # exclude it from weight decay
+        self.nondecay_weight = nn.Parameter(init_tensor.clone(), requires_grad=True)
 
         # At initialization, compute the dominant right-singular vector (v_0)
         # and store it in a non-trainable buffer.
         with torch.no_grad():
-            _, _, v_transpose = torch.linalg.svd(self.weight, full_matrices=False)
+            _, _, v_transpose = torch.linalg.svd(
+                self.nondecay_weight, full_matrices=False
+            )
             # v_transpose[0] is the first row of V^T, which is the first right-singular vector.
             self.register_buffer("anchor_vector", v_transpose[0])
 
-        initial_norm = torch.linalg.vector_norm(self.weight.mv(self.anchor_vector))
+        initial_norm = torch.linalg.vector_norm(
+            self.nondecay_weight.mv(self.anchor_vector)
+        )
         self.scale = nn.Parameter(initial_norm.clone().detach(), requires_grad=True)
 
     def forward(self) -> torch.Tensor:
         # Calculate the L2 norm of the matrix-vector product W @ v_0
-        norm = torch.linalg.vector_norm(self.weight.mv(self.anchor_vector))
+        norm = torch.linalg.vector_norm(self.nondecay_weight.mv(self.anchor_vector))
 
         # Return the reparameterized tensor.
-        return self.scale * (self.weight / (norm + 1e-6))
+        return self.scale * (self.nondecay_weight / (norm + 1e-6))

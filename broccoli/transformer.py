@@ -236,7 +236,7 @@ class FeedforwardBlock(nn.Module):
         activation_kwargs=None,
         dropout=0.0,
         linear_module=nn.Linear,
-        reparam=False,
+        raw_input=False,
     ):
         super().__init__()
 
@@ -253,8 +253,9 @@ class FeedforwardBlock(nn.Module):
             else ratio * output_features
         )
 
-        if reparam:
+        if raw_input:
             self.memory_type = AnchoredLinear
+
         else:
             self.memory_type = linear_module
 
@@ -263,7 +264,7 @@ class FeedforwardBlock(nn.Module):
                 nn.LayerNorm(input_features),
                 linear_module(input_features, self.max_features),
                 self.activation,
-                # nn.LayerNorm(ratio * output_features),
+                nn.LayerNorm(ratio * output_features) if raw_input else nn.Identity(),
                 self.memory_type(ratio * output_features, output_features),
                 self.dropout,
             ]
