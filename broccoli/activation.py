@@ -8,16 +8,18 @@ class ReLU(nn.Module):
     A ReLU activation function with optional clamp and leakiness.
     """
 
-    def __init__(self, clamp=True, leaky=True, leaky_slope=0.01, clamp_max=6.0) -> None:
+    def __init__(
+        self, clamp=True, leaky=True, negative_slope=0.01, clamp_max=6.0
+    ) -> None:
         super().__init__()
         self.clamp = clamp
         self.leaky = leaky
-        self.leaky_slope = leaky_slope
+        self.negative_slope = negative_slope
         self.clamp_max = clamp_max
 
     def forward(self, x):
         if self.leaky:
-            relu = F.leaky_relu(x, leaky_slope=self.leaky_slope)
+            relu = F.leaky_relu(x, negative_slope=self.negative_slope)
         else:
             relu = F.relu(x)
         if self.clamp:
@@ -69,17 +71,17 @@ class SquaredReLU(nn.Module):
     """
 
     def __init__(
-        self, clamp=True, leaky=True, leaky_slope: float = 0.01, clamp_max=6
+        self, clamp=True, leaky=True, negative_slope: float = 0.01, clamp_max=6
     ) -> None:
         super().__init__()
         self.clamp = clamp
         self.leaky = leaky
-        self.leaky_slope = leaky_slope
+        self.negative_slope = negative_slope
         self.clamp_max = clamp_max
 
     def forward(self, x):
         if self.leaky:
-            relu = F.leaky_relu(x, leaky_slope=self.leaky_slope)
+            relu = F.leaky_relu(x, negative_slope=self.negative_slope)
         else:
             relu = F.relu(x)
         relu_squared = relu**2
@@ -102,12 +104,12 @@ class XGLU(nn.Module):
         return self.activation(gate) * value
 
 
-def SquaredReGLU(clamp=True, leaky=True, leaky_slope=0.01, clamp_max=6.0) -> XGLU:
+def SquaredReGLU(clamp=True, leaky=True, negative_slope=0.01, clamp_max=6.0) -> XGLU:
     """
     Factory function that creates a GLU with a SquaredReLU activation.
     """
     activation_module = SquaredReLU(
-        clamp=clamp, leaky=leaky, leaky_slope=leaky_slope, clamp_max=clamp_max
+        clamp=clamp, leaky=leaky, negative_slope=negative_slope, clamp_max=clamp_max
     )
     return XGLU(activation_module)
 
