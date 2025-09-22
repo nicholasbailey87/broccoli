@@ -236,7 +236,8 @@ class FeedforwardBlock(nn.Module):
         activation_kwargs=None,
         dropout=0.0,
         linear_module=nn.Linear,
-        raw_input=False,
+        pre_norm=True,
+        normformer=False,
     ):
         super().__init__()
 
@@ -253,19 +254,13 @@ class FeedforwardBlock(nn.Module):
             else ratio * output_features
         )
 
-        if raw_input:
-            self.memory_type = AnchoredLinear
-
-        else:
-            self.memory_type = linear_module
-
         self.process = nn.Sequential(
             *[
-                nn.LayerNorm(input_features),
+                nn.LayerNorm(input_features) if pre_norm else nn.Identity(),
                 linear_module(input_features, self.max_features),
                 self.activation,
-                # nn.LayerNorm(ratio * output_features) if raw_input else nn.Identity(),
-                self.memory_type(ratio * output_features, output_features),
+                nn.LayerNorm(ratio * output_features) if normformer else nn.Identity(),
+                linear_module(ratio * output_features, output_features),
                 self.dropout,
             ]
         )
@@ -299,6 +294,8 @@ class TransformerBlock(nn.Module):
         identity_probability=0.0,
         causal=False,
         linear_module=nn.Linear,
+        pre_norm=True,
+        normformer=False,
     ):
         super().__init__()
 
@@ -339,6 +336,8 @@ class TransformerBlock(nn.Module):
             activation_kwargs=activation_kwargs,
             dropout=mlp_dropout,
             linear_module=linear_module,
+            pre_norm=pre_norm,
+            normformer=normformer,
         )
 
     @property
@@ -393,6 +392,8 @@ class TransformerEncoder(nn.Module):
         linear_module=nn.Linear,
         bos_tokens=0,
         return_bos_tokens=False,
+        pre_norm=True,
+        normformer=False,
     ):
         if position_embedding_type == "relative":
             assert source_size is not None  # TODO: make this a proper exception
@@ -451,6 +452,8 @@ class TransformerEncoder(nn.Module):
                     identity_probability=self.stochastic_depth_probabilities[i],
                     causal=causal,
                     linear_module=linear_module,
+                    pre_norm=pre_norm,
+                    normformer=normformer,
                 )
                 for i in range(n_layers)
             ]

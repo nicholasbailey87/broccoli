@@ -100,3 +100,24 @@ class AnchoredReparamTensor(nn.Module):
 
         # Return the reparameterized tensor.
         return self.scale * (self.nondecay_weight / (norm + 1e-6))
+
+
+class NormReparamTensor(nn.Module):
+    """
+    Reparameterise a tensor as a normalised tensor of weights multiplied by a
+        learnable scaling factor.
+    """
+
+    def __init__(self, init_tensor: torch.Tensor):
+        assert init_tensor.ndim == 2, "Input tensor must be a 2D matrix."
+        super().__init__()
+
+        # Use the gradboard convention of calling something nondecay_* if we should
+        # exclude it from weight decay
+        self.nondecay_weight = nn.Parameter(init_tensor.clone(), requires_grad=True)
+        self.scale = nn.Parameter(
+            torch.linalg.norm(self.nondecay_weight).clone().detach(), requires_grad=True
+        )
+
+    def forward(self) -> torch.Tensor:
+        return self.scale * F.normalize(self.nondecay_weight)

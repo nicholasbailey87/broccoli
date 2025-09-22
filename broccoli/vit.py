@@ -117,6 +117,8 @@ class ViTEncoder(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
+        transformer_pre_norm=True,
+        transformer_normformer=False,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -289,6 +291,8 @@ class ViTEncoder(nn.Module):
                 linear_module=linear_module,
                 bos_tokens=transformer_bos_tokens,
                 return_bos_tokens=transformer_return_bos_tokens,
+                pre_norm=transformer_pre_norm,
+                normformer=transformer_normformer,
             )
         else:
             self.transformer = nn.Identity()
@@ -356,6 +360,8 @@ class ViT(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
+        transformer_pre_norm=True,
+        transformer_normformer=False,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -410,6 +416,8 @@ class ViT(nn.Module):
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
             transformer_feedforward_first=transformer_feedforward_first,
+            transformer_pre_norm=transformer_pre_norm,
+            transformer_normformer=transformer_normformer,
             transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
