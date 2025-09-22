@@ -299,9 +299,12 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
 
+        self.pre_norm = pre_norm
+
         self.identity_probability = identity_probability
 
-        self.layer_norm = nn.LayerNorm(d_model)
+        self.layer_norm_1 = nn.LayerNorm(d_model)
+        self.layer_norm_2 = nn.LayerNorm(d_model)
 
         if position_embedding_type == "relative":
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
@@ -358,12 +361,19 @@ class TransformerBlock(nn.Module):
         identity_x = shuffled[:identity_count, :, :]
         process_x = shuffled[identity_count:, :, :]
 
-        norm_process_x = self.layer_norm(process_x)
-        process_x = process_x + self.attn(
-            norm_process_x, norm_process_x, norm_process_x
-        )
-        process_x = process_x + self.ff(process_x)
-        x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
+        if self.pre_norm:
+            norm_process_x = self.layer_norm_1(process_x)
+            process_x = process_x + self.attn(
+                norm_process_x, norm_process_x, norm_process_x
+            )
+            process_x = process_x + self.ff(process_x)
+        else:  # post-norm
+            process_x = process_x + self.attn(process_x, process_x, process_x)
+            norm_process_x = self.layer_norm_1(process_x)
+            process_x = process_x + self.ff(process_x)
+            x = self.layer_norm_2(
+                torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
+            )
 
         return x
 

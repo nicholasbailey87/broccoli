@@ -306,7 +306,8 @@ class ViTEncoder(nn.Module):
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
                 linear_module=linear_module,
-                raw_input=not cnn,
+                pre_norm=transformer_pre_norm,
+                normformer=transformer_normformer,
             )
         else:
             self.initial_ff = nn.Identity()
