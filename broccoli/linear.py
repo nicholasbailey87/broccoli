@@ -95,7 +95,7 @@ class AnchoredLinear(nn.Module):
         )
 
 
-class ReparamLinear(nn.Module):
+class WeightNormedLinear(nn.Module):
     """
     ...
     """
