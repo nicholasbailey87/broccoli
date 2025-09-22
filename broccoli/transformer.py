@@ -264,7 +264,7 @@ class FeedforwardBlock(nn.Module):
                 nn.LayerNorm(input_features),
                 linear_module(input_features, self.max_features),
                 self.activation,
-                nn.LayerNorm(ratio * output_features) if raw_input else nn.Identity(),
+                # nn.LayerNorm(ratio * output_features) if raw_input else nn.Identity(),
                 self.memory_type(ratio * output_features, output_features),
                 self.dropout,
             ]
