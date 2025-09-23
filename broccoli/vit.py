@@ -308,7 +308,7 @@ class ViTEncoder(nn.Module):
                 linear_module=linear_module,
                 pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
-                # raw_input=not cnn,
+                raw_input=not cnn,
             )
         else:
             self.initial_ff = nn.Identity()
