@@ -379,13 +379,12 @@ class TransformerBlock(nn.Module):
             process_x = process_x + self.ff(process_x)
         else:  # post-norm
             process_x = process_x + self.attn(process_x, process_x, process_x)
-            norm_process_x = self.layer_norm_1(process_x)
+            process_x = self.layer_norm_1(process_x)
             process_x = process_x + self.ff(process_x)
+            process_x = self.layer_norm_2(process_x)
 
         # Always post norm as eventually we reach the classification head!
-        x = self.layer_norm_2(
-            torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
-        )
+        x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
 
         return x
 
