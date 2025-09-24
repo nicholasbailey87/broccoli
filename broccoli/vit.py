@@ -67,7 +67,7 @@ class ClassificationHead(nn.Module):
 
         self.classification_process = nn.Sequential(
             *[
-                nn.LayerNorm() if layer_norm else nn.Identity(),
+                nn.LayerNorm(d_model) if layer_norm else nn.Identity(),
                 self.summarize,
                 self.projection,
                 self.batch_norm,
