@@ -53,11 +53,13 @@ class ClassificationHead(nn.Module):
     A general classification head for a ViT
     """
 
-    def __init__(self, d_model, linear_module, n_classes, batch_norm=True):
+    def __init__(
+        self, d_model, linear_module, n_classes, layer_norm=True, batch_norm=True
+    ):
         super().__init__()
         self.d_model = d_model
         self.summarize = GetCLSToken()
-        self.projection = nn.Linear(d_model, n_classes)
+        self.projection = linear_module(d_model, n_classes)
         if batch_norm:
             self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
         else:
@@ -65,6 +67,7 @@ class ClassificationHead(nn.Module):
 
         self.classification_process = nn.Sequential(
             *[
+                nn.LayerNorm if layer_norm else nn.Identity(),
                 self.summarize,
                 self.projection,
                 self.batch_norm,

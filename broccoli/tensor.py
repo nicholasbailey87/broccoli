@@ -58,48 +58,52 @@ class SigmaReparamTensor(nn.Module):
 
 class AnchoredReparamTensor(nn.Module):
     """
-    Reparameterise a tensor as a normalised tensor of weights multiplied by a
-        learnable scaling factor.
+    Reparameterises a tensor by decoupling its magnitude and direction.
 
-    The tensor of weights is also reparameterised as the product of a learnable
-        weight tensor with the (fixed) dominant right-singular vector of the
-        weight tensor as it was initialised.
+    The direction is represented by a learnable weight tensor, normalised by the
+    Rayleigh quotient with respect to its initial dominant right-singular vector.
+    The magnitude is a separate learnable scalar.
 
-    i.e this module represents a tensor reparameterised as:
+    The reparameterization is:
 
-        W_reparam = scale * (W / ||W @ v_0||_2)
+        W_reparam = scale * (W / norm)
 
-        where v_0 is the dominant right-singular vector of the initial tensor W_init.
+    where the norm is the Rayleigh quotient uᵀWv₀, with v₀ being the dominant
+    right-singular vector of the initial tensor and u = normalize(Wv₀).
     """
 
     def __init__(self, init_tensor: torch.Tensor):
-        assert init_tensor.ndim == 2, "Input tensor must be a 2D matrix."
+        assert init_tensor.ndim == 2
+
         super().__init__()
 
-        # Use the gradboard convention of calling something nondecay_* if we should
-        # exclude it from weight decay
-        self.nondecay_weight = nn.Parameter(init_tensor.clone(), requires_grad=True)
+        self.nondecay_weight = nn.Parameter(init_tensor, requires_grad=True)
 
-        # At initialization, compute the dominant right-singular vector (v_0)
-        # and store it in a non-trainable buffer.
         with torch.no_grad():
-            _, _, v_transpose = torch.linalg.svd(
+            _, sigma, v_transpose = torch.linalg.svd(
                 self.nondecay_weight, full_matrices=False
             )
-            # v_transpose[0] is the first row of V^T, which is the first right-singular vector.
-            self.register_buffer("anchor_vector", v_transpose[0])
 
-        initial_norm = torch.linalg.vector_norm(
-            self.nondecay_weight.mv(self.anchor_vector)
-        )
-        self.scale = nn.Parameter(initial_norm.clone().detach(), requires_grad=True)
+        self.register_buffer("rayleigh_norm", sigma[:1])
+        self.register_buffer("initial_right_singular", v_transpose[0])
+        self.scale = nn.Parameter(sigma[:1].clone().detach(), requires_grad=True)
 
-    def forward(self) -> torch.Tensor:
-        # Calculate the L2 norm of the matrix-vector product W @ v_0
-        norm = torch.linalg.vector_norm(self.nondecay_weight.mv(self.anchor_vector))
+    def _update_rayleigh_norm(self):
+        with torch.no_grad():
+            product = self.nondecay_weight.mv(self.initial_right_singular)
+            normed_product = F.normalize(product, dim=0)
+            rayleigh_norm = torch.einsum(
+                "m,mn,n->",
+                normed_product,
+                self.nondecay_weight,
+                self.initial_right_singular,
+            )
+            self.rayleigh.data.copy_(rayleigh_norm)
 
-        # Return the reparameterized tensor.
-        return self.scale * (self.nondecay_weight / (norm + 1e-6))
+    def forward(self):
+        if self.training:
+            self._update_rayleigh_norm()
+        return self.scale * (self.nondecay_weight / (self.rayleigh_norm + 1e-6))
 
 
 class NormReparamTensor(nn.Module):
@@ -120,4 +124,5 @@ class NormReparamTensor(nn.Module):
         )
 
     def forward(self) -> torch.Tensor:
-        return self.scale * F.normalize(self.nondecay_weight)
+        norm = torch.linalg.norm(self.nondecay_weight)
+        return self.scale * (self.nondecay_weight / (norm + 1e-6))
