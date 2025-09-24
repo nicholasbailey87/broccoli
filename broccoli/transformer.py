@@ -248,7 +248,7 @@ class FeedforwardBlock(nn.Module):
             self.activation = activation()
 
         if raw_input:
-            self.memory_type = SpectralNormLinear
+            self.memory_type = AnchoredLinear
             self.memory_bias = False
         else:
             self.memory_type = nn.Linear
