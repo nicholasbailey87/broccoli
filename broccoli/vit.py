@@ -53,9 +53,7 @@ class ClassificationHead(nn.Module):
     A general classification head for a ViT
     """
 
-    def __init__(
-        self, d_model, linear_module, n_classes, layer_norm=True, batch_norm=True
-    ):
+    def __init__(self, d_model, linear_module, n_classes, batch_norm=True):
         super().__init__()
         self.d_model = d_model
         self.summarize = GetCLSToken()
@@ -67,7 +65,6 @@ class ClassificationHead(nn.Module):
 
         self.classification_process = nn.Sequential(
             *[
-                nn.LayerNorm(d_model) if layer_norm else nn.Identity(),
                 self.summarize,
                 self.projection,
                 self.batch_norm,
@@ -120,8 +117,11 @@ class ViTEncoder(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
+        transformer_initial_ff_residual_path=True,
+        transformer_initial_ff_linear_module=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
+        transformer_post_norm=False,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -308,10 +308,14 @@ class ViTEncoder(nn.Module):
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
-                linear_module=linear_module,
+                linear_module=(
+                    transformer_initial_ff_linear_module
+                    if transformer_initial_ff_linear_module is not None
+                    else linear_module
+                ),
                 pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
-                raw_input=not cnn,
+                residual_path=transformer_initial_ff_residual_path,
             )
         else:
             self.initial_ff = nn.Identity()
@@ -365,8 +369,11 @@ class ViT(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
+        transformer_initial_ff_residual_path=True,
+        transformer_initial_ff_linear_module=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
+        transformer_post_norm=False,
         transformer_position_embedding="relative",  # absolute or relative
         transformer_embedding_size=256,
         transformer_layers=7,
@@ -421,8 +428,11 @@ class ViT(nn.Module):
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
             transformer_feedforward_first=transformer_feedforward_first,
+            transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
+            transformer_initial_ff_linear_module=transformer_initial_ff_linear_module,
             transformer_pre_norm=transformer_pre_norm,
             transformer_normformer=transformer_normformer,
+            transformer_post_norm=transformer_post_norm,
             transformer_position_embedding=transformer_position_embedding,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,

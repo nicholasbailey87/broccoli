@@ -238,21 +238,21 @@ class FeedforwardBlock(nn.Module):
         linear_module=nn.Linear,
         pre_norm=True,
         normformer=False,
-        raw_input=False,
+        post_norm=True,
+        residual_path=True,
     ):
         super().__init__()
+
+        self.residual_path = residual_path
+        self.post_norm = post_norm
+
+        if self.post_norm:
+            self.layernorm = nn.LayerNorm(output_features)
 
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
         else:
             self.activation = activation()
-
-        if raw_input:
-            self.memory_type = AnchoredLinear
-            self.memory_bias = False
-        else:
-            self.memory_type = nn.Linear
-            self.memory_bias = True
 
         self.dropout = nn.Dropout(dropout)
 
@@ -268,15 +268,18 @@ class FeedforwardBlock(nn.Module):
                 linear_module(input_features, self.max_features),
                 self.activation,
                 nn.LayerNorm(ratio * output_features) if normformer else nn.Identity(),
-                self.memory_type(
-                    ratio * output_features, output_features, bias=self.memory_bias
-                ),
+                linear_module(ratio * output_features, output_features),
                 self.dropout,
             ]
         )
 
     def forward(self, x):
-        return self.process(x)
+        if self.residual_path and self.post_norm:
+            return self.layernorm(x + self.process(x))
+        elif self.residual_path:
+            return x + self.process(x)
+        else:
+            return x
 
 
 class TransformerBlock(nn.Module):
@@ -305,11 +308,14 @@ class TransformerBlock(nn.Module):
         causal=False,
         linear_module=nn.Linear,
         pre_norm=True,
+        post_norm=False,
         normformer=False,
     ):
         super().__init__()
 
         self.pre_norm = pre_norm
+        self.post_norm = post_norm
+        self.normformer = normformer
 
         self.identity_probability = identity_probability
 
@@ -351,6 +357,8 @@ class TransformerBlock(nn.Module):
             linear_module=linear_module,
             pre_norm=pre_norm,
             normformer=normformer,
+            post_norm=post_norm,
+            residual_path=True,
         )
 
     @property
@@ -371,19 +379,18 @@ class TransformerBlock(nn.Module):
         identity_x = shuffled[:identity_count, :, :]
         process_x = shuffled[identity_count:, :, :]
 
+        residual_x = process_x
+
         if self.pre_norm:
-            norm_process_x = self.layer_norm_1(process_x)
-            process_x = process_x + self.attn(
-                norm_process_x, norm_process_x, norm_process_x
-            )
-            process_x = process_x + self.ff(process_x)
-        else:  # post-norm
-            process_x = process_x + self.attn(process_x, process_x, process_x)
             process_x = self.layer_norm_1(process_x)
-            process_x = process_x + self.ff(process_x)
+
+        process_x = residual_x + self.attn(process_x, process_x, process_x)
+
+        if self.post_norm:
             process_x = self.layer_norm_2(process_x)
 
-        # Always post norm as eventually we reach the classification head!
+        process_x = self.ff(process_x)
+
         x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
 
         return x
@@ -414,6 +421,7 @@ class TransformerEncoder(nn.Module):
         bos_tokens=0,
         return_bos_tokens=False,
         pre_norm=True,
+        post_norm=False,
         normformer=False,
     ):
         if position_embedding_type == "relative":
@@ -474,6 +482,7 @@ class TransformerEncoder(nn.Module):
                     causal=causal,
                     linear_module=linear_module,
                     pre_norm=pre_norm,
+                    post_norm=post_norm,
                     normformer=normformer,
                 )
                 for i in range(n_layers)
