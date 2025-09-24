@@ -98,7 +98,7 @@ class AnchoredReparamTensor(nn.Module):
                 self.nondecay_weight,
                 self.initial_right_singular,
             )
-            self.rayleigh.data.copy_(rayleigh_norm)
+            self.rayleigh_norm.data.copy_(rayleigh_norm)
 
     def forward(self):
         if self.training:
