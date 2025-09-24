@@ -118,7 +118,8 @@ class ViTEncoder(nn.Module):
         pooling_padding=1,
         transformer_feedforward_first=True,
         transformer_initial_ff_residual_path=True,
-        transformer_initial_ff_linear_module=None,
+        transformer_initial_ff_linear_module_up=None,
+        transformer_initial_ff_linear_module_down=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
         transformer_post_norm=False,
@@ -296,6 +297,7 @@ class ViTEncoder(nn.Module):
                 return_bos_tokens=transformer_return_bos_tokens,
                 pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
+                post_norm=transformer_post_norm,
             )
         else:
             self.transformer = nn.Identity()
@@ -308,13 +310,19 @@ class ViTEncoder(nn.Module):
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
-                linear_module=(
-                    transformer_initial_ff_linear_module
-                    if transformer_initial_ff_linear_module is not None
+                linear_module_up=(
+                    transformer_initial_ff_linear_module_up
+                    if transformer_initial_ff_linear_module_up is not None
+                    else linear_module
+                ),
+                linear_module_down=(
+                    transformer_initial_ff_linear_module_down
+                    if transformer_initial_ff_linear_module_down is not None
                     else linear_module
                 ),
                 pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
+                post_norm=transformer_post_norm,
                 residual_path=transformer_initial_ff_residual_path,
             )
         else:
@@ -370,7 +378,8 @@ class ViT(nn.Module):
         pooling_padding=1,
         transformer_feedforward_first=True,
         transformer_initial_ff_residual_path=True,
-        transformer_initial_ff_linear_module=None,
+        transformer_initial_ff_linear_module_up=None,
+        transformer_initial_ff_linear_module_down=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
         transformer_post_norm=False,
@@ -429,7 +438,8 @@ class ViT(nn.Module):
             pooling_padding=pooling_padding,
             transformer_feedforward_first=transformer_feedforward_first,
             transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
-            transformer_initial_ff_linear_module=transformer_initial_ff_linear_module,
+            transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
+            transformer_initial_ff_linear_module_down=transformer_initial_ff_linear_module_down,
             transformer_pre_norm=transformer_pre_norm,
             transformer_normformer=transformer_normformer,
             transformer_post_norm=transformer_post_norm,

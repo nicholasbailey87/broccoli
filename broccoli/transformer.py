@@ -235,7 +235,8 @@ class FeedforwardBlock(nn.Module):
         activation=nn.ReLU,
         activation_kwargs=None,
         dropout=0.0,
-        linear_module=nn.Linear,
+        linear_module_up=nn.Linear,
+        linear_module_down=nn.Linear,
         pre_norm=True,
         normformer=False,
         post_norm=True,
@@ -265,10 +266,10 @@ class FeedforwardBlock(nn.Module):
         self.process = nn.Sequential(
             *[
                 nn.LayerNorm(input_features) if pre_norm else nn.Identity(),
-                linear_module(input_features, self.max_features),
+                linear_module_up(input_features, self.max_features),
                 self.activation,
                 nn.LayerNorm(ratio * output_features) if normformer else nn.Identity(),
-                linear_module(ratio * output_features, output_features),
+                linear_module_down(ratio * output_features, output_features),
                 self.dropout,
             ]
         )
@@ -346,7 +347,7 @@ class TransformerBlock(nn.Module):
             bos_tokens=bos_tokens,
         )
 
-        # Submodules for the feedforward process
+        # Submodule for the feedforward process
         self.ff = FeedforwardBlock(
             d_model,
             mlp_ratio,
@@ -354,7 +355,8 @@ class TransformerBlock(nn.Module):
             activation=activation,
             activation_kwargs=activation_kwargs,
             dropout=mlp_dropout,
-            linear_module=linear_module,
+            linear_module_up=linear_module,
+            linear_module_down=linear_module,
             pre_norm=pre_norm,
             normformer=normformer,
             post_norm=post_norm,
