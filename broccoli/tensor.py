@@ -77,25 +77,25 @@ class AnchoredReparamTensor(nn.Module):
 
         super().__init__()
 
-        self.nondecay_weight = nn.Parameter(init_tensor, requires_grad=True)
+        self.weight = nn.Parameter(init_tensor, requires_grad=True)
 
         with torch.no_grad():
-            _, sigma, v_transpose = torch.linalg.svd(
-                self.nondecay_weight, full_matrices=False
-            )
+            _, sigma, v_transpose = torch.linalg.svd(self.weight, full_matrices=False)
 
         self.register_buffer("rayleigh_norm", sigma[:1])
         self.register_buffer("initial_right_singular", v_transpose[0])
-        self.scale = nn.Parameter(sigma[:1].clone().detach(), requires_grad=True)
+        self.nondecay_scale = nn.Parameter(
+            sigma[:1].clone().detach(), requires_grad=True
+        )
 
     def _update_rayleigh_norm(self):
         with torch.no_grad():
-            product = self.nondecay_weight.mv(self.initial_right_singular)
+            product = self.weight.mv(self.initial_right_singular)
             normed_product = F.normalize(product, dim=0)
             rayleigh_norm = torch.einsum(
                 "m,mn,n->",
                 normed_product,
-                self.nondecay_weight,
+                self.weight,
                 self.initial_right_singular,
             )
             self.rayleigh_norm.data.copy_(rayleigh_norm)
@@ -103,7 +103,7 @@ class AnchoredReparamTensor(nn.Module):
     def forward(self):
         if self.training:
             self._update_rayleigh_norm()
-        return self.scale * (self.nondecay_weight / (self.rayleigh_norm + 1e-6))
+        return self.nondecay_scale * (self.weight / (self.rayleigh_norm + 1e-6))
 
 
 class NormReparamTensor(nn.Module):
@@ -118,11 +118,11 @@ class NormReparamTensor(nn.Module):
 
         # Use the gradboard convention of calling something nondecay_* if we should
         # exclude it from weight decay
-        self.nondecay_weight = nn.Parameter(init_tensor.clone(), requires_grad=True)
-        self.scale = nn.Parameter(
-            torch.linalg.norm(self.nondecay_weight).clone().detach(), requires_grad=True
+        self.weight = nn.Parameter(init_tensor.clone(), requires_grad=True)
+        self.nondecay_scale = nn.Parameter(
+            torch.linalg.norm(self.weight).clone().detach(), requires_grad=True
         )
 
     def forward(self) -> torch.Tensor:
-        norm = torch.linalg.norm(self.nondecay_weight)
-        return self.scale * (self.nondecay_weight / (norm + 1e-6))
+        norm = torch.linalg.norm(self.weight)
+        return self.nondecay_scale * (self.weight / (norm + 1e-6))
