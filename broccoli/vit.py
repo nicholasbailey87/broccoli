@@ -236,13 +236,7 @@ class ViTEncoder(nn.Module):
 
         if pooling_type is None:
             pooling_out_channels = cnn_activation_out_channels
-            self.pool = nn.Sequential(
-                *[
-                    Rearrange(
-                        f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
-                    ),  # for transformer
-                ]
-            )
+            self.pool = nn.Identity()
 
         elif pooling_type == "max":
             pooling_out_channels = cnn_activation_out_channels

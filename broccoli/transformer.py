@@ -21,45 +21,6 @@ class MHAttention(nn.Module):
         are the same shape.
 
     Assumes bias=False and batch_first=True, as God intended.
-
-    Optionally adds various bells and whistles suggested in the
-        literature, including:
-
-        Noam Shazeer's scaled attention per "Attention is All You Need"
-            (https://arxiv.org/abs/1706.03762).
-
-        Max subtract softmax as discussed in "Attention As An RNN"
-            (https://arxiv.org/abs/2405.13956)
-
-        Log-length scaled softmax per "Overcoming a Theoretical Limitation of
-            Self-Attention" (https://arxiv.org/abs/2202.12172).
-
-        Quiet softmax per
-            https://www.evanmiller.org/attention-is-off-by-one.html
-
-    Args:
-        d_model: ...
-        n_heads: ...
-        dropout: ...
-        causal: should a causal mask be applied to the logits before attention
-            is applied? This is standard when using self-attention. Cannot be
-            True if inputs won't be square (e.g. if sequence length for
-            encoder and decoder are different)
-        sequence_length: ...
-        share_kv: ...
-        linear_module: ...
-        max_subtract: if True, the maximum logit value is subtracted from all
-            logits before performing the softmax operation to create a more
-            numerically stable softmax. This is discussed in "Attention As An
-            RNN" (https://arxiv.org/abs/2405.13956).
-        d_model_scale: ...
-        log_length_scale: if True, multiplies logits by the log length of
-            the decoder sequence before performing the softmax operation, as
-            proposed in "Overcoming a Theoretical Limitation of Self-Attention"
-            (https://arxiv.org/abs/2202.12172).
-        quiet: if True, adds 1 to the denominator of the softmax operation,
-            allowing some tokens to attend to no other tokens as described in
-            https://www.evanmiller.org/attention-is-off-by-one.html.
     """
 
     def __init__(
@@ -280,7 +241,7 @@ class FeedforwardBlock(nn.Module):
         elif self.residual_path:
             return x + self.process(x)
         else:
-            return x
+            return self.process(x)
 
 
 class TransformerBlock(nn.Module):
@@ -374,7 +335,9 @@ class TransformerBlock(nn.Module):
             identity_probability = self.identity_probability
 
         # perform the identity operation for some rows in the batch
-        identity_count = random.binomial(n=x.size(0), p=identity_probability)
+        dist = torch.distributions.Binomial(x.size(0), identity_probability)
+        identity_count = int(dist.sample().item())
+
         shuffle_indices = torch.randperm(x.size(0), device=x.device)
         unshuffle_indices = torch.argsort(shuffle_indices)
         shuffled = x[shuffle_indices, :, :]
