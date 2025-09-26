@@ -13,6 +13,45 @@ from .rope import RotaryEmbedding, apply_rotary_emb
 from .linear import AnchoredLinear, SpectralNormLinear
 
 
+def drop_path(
+    x, drop_prob: float = 0.0, training: bool = False, scale_by_keep: bool = True
+):
+    """
+    From https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
+    Copyright 2019 Ross Wightman
+    See documentation and licence there.
+    """
+    if drop_prob == 0.0 or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    shape = (x.shape[0],) + (1,) * (
+        x.ndim - 1
+    )  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+    if keep_prob > 0.0 and scale_by_keep:
+        random_tensor.div_(keep_prob)
+    return x * random_tensor
+
+
+class DropPath(nn.Module):
+    """
+    From https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
+    Copyright 2019 Ross Wightman
+    See documentation and licence there.
+    """
+
+    def __init__(self, drop_prob: float = 0.0, scale_by_keep: bool = True):
+        super(DropPath, self).__init__()
+        self.drop_prob = drop_prob
+        self.scale_by_keep = scale_by_keep
+
+    def forward(self, x):
+        return drop_path(x, self.drop_prob, self.training, self.scale_by_keep)
+
+    def extra_repr(self):
+        return f"drop_prob={round(self.drop_prob, 3):0.3f}"
+
+
 class MHAttention(nn.Module):
     """
     Multi-head self-attention using einops and optionally a custom linear layer.
@@ -279,10 +318,11 @@ class TransformerBlock(nn.Module):
         self.post_norm = post_norm
         self.normformer = normformer
 
-        self.identity_probability = identity_probability
+        self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
         self.layer_norm_1 = nn.LayerNorm(d_model)
         self.layer_norm_2 = nn.LayerNorm(d_model)
+        self.layer_norm_3 = nn.LayerNorm(d_model)
 
         if position_embedding_type == "relative":
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
@@ -318,10 +358,10 @@ class TransformerBlock(nn.Module):
             dropout=mlp_dropout,
             linear_module_up=linear_module,
             linear_module_down=linear_module,
-            pre_norm=pre_norm,
+            pre_norm=False,  # Handled outside the block
             normformer=normformer,
-            post_norm=post_norm,
-            residual_path=True,
+            post_norm=False,  # Handled outside the block
+            residual_path=False,  # Handled outside the block
         )
 
     @property
@@ -329,36 +369,70 @@ class TransformerBlock(nn.Module):
         return self.attn._kv_distance
 
     def forward(self, x):
-        if not self.training:
-            identity_probability = 0.0
-        else:
-            identity_probability = self.identity_probability
-
-        # perform the identity operation for some rows in the batch
-        dist = torch.distributions.Binomial(x.size(0), identity_probability)
-        identity_count = int(dist.sample().item())
-
-        shuffle_indices = torch.randperm(x.size(0), device=x.device)
-        unshuffle_indices = torch.argsort(shuffle_indices)
-        shuffled = x[shuffle_indices, :, :]
-        identity_x = shuffled[:identity_count, :, :]
-        process_x = shuffled[identity_count:, :, :]
-
-        residual_x = process_x
 
         if self.pre_norm:
-            process_x = self.layer_norm_1(process_x)
+            normx = self.layer_norm_1(x)
+            x = x + self.drop_path(self.attn(normx, normx, normx))
+            normx = self.layer_norm_2(x)
+            x = x + self.drop_path(self.ff(normx))
+        elif self.post_norm:
+            x = x + self.drop_path(self.attn(x, x, x))
+            x = self.layer_norm_1(x)
+            x = x + self.drop_path(self.ff(x))
+            x = self.layer_norm_2(x)
+        else:
+            x = x + self.drop_path(self.attn(x, x, x))
+            x = x + self.drop_path(self.ff(x))
 
-        process_x = residual_x + self.attn(process_x, process_x, process_x)
-
-        if self.post_norm:
-            process_x = self.layer_norm_2(process_x)
-
-        process_x = self.ff(process_x)
-
-        x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
+        if self.pre_norm and self.post_norm:
+            x = self.layer_norm_3(x)
 
         return x
+
+    #     if not self.training:
+    #         identity_probability = 0.0
+    #     else:
+    #         identity_probability = self.identity_probability
+
+    #     if random.random() < identity_probability:
+    #         return x
+    #     else:
+    #         ...
+
+    #     # perform the identity operation for some rows in the batch
+    #     dist = torch.distributions.Binomial(x.size(0), identity_probability)
+    #     identity_count = int(dist.sample().item())
+
+    #     shuffle_indices = torch.randperm(x.size(0), device=x.device)
+    #     unshuffle_indices = torch.argsort(shuffle_indices)
+    #     shuffled = x[shuffle_indices, :, :]
+    #     norm_shuffled = self.layer_norm_1(shuffled)
+    #     identity_x = shuffled[:identity_count, :, :]
+    #     process_x = shuffled[identity_count:, :, :]
+    #     residual = process_x
+
+    #     if self.pre_norm:
+    #         process_x = norm_shuffled[identity_count:, :, :]
+
+    #     process_x = residual + self.attn(process_x, process_x, process_x)
+    #     residual = process_x
+
+    #     shuffled = torch.cat([identity_x, process_x])
+    #     norm_shuffled = self.layer_norm_2(shuffled)
+
+    #     if self.pre_norm:
+    #         residual = process_x # residual NOT normed
+    #         process_x = norm_shuffled[identity_count:, :, :]
+
+    #     if self.post_norm:
+    #         process_x = norm_shuffled[identity_count:, :, :]
+    #         residual = process_x # residual normed
+
+    #     process_x = residual + self.ff(process_x) # handles residual connection
+
+    #     x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
+
+    #     return x if not self.post_norm else self.layer_norm_3(x)
 
 
 class TransformerEncoder(nn.Module):
