@@ -303,6 +303,8 @@ class TransformerBlock(nn.Module):
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
+        ff_linear_module_up=None,
+        ff_linear_module_down=None,
         mlp_dropout=0.0,
         msa_dropout=0.0,
         identity_probability=0.0,
@@ -356,8 +358,16 @@ class TransformerBlock(nn.Module):
             activation=activation,
             activation_kwargs=activation_kwargs,
             dropout=mlp_dropout,
-            linear_module_up=linear_module,
-            linear_module_down=linear_module,
+            linear_module_up=(
+                ff_linear_module_up
+                if ff_linear_module_up is not None
+                else linear_module
+            ),
+            linear_module_down=(
+                ff_linear_module_down
+                if ff_linear_module_down is not None
+                else linear_module
+            ),
             pre_norm=False,  # Handled outside the block
             normformer=normformer,
             post_norm=False,  # Handled outside the block
@@ -389,51 +399,6 @@ class TransformerBlock(nn.Module):
 
         return x
 
-    #     if not self.training:
-    #         identity_probability = 0.0
-    #     else:
-    #         identity_probability = self.identity_probability
-
-    #     if random.random() < identity_probability:
-    #         return x
-    #     else:
-    #         ...
-
-    #     # perform the identity operation for some rows in the batch
-    #     dist = torch.distributions.Binomial(x.size(0), identity_probability)
-    #     identity_count = int(dist.sample().item())
-
-    #     shuffle_indices = torch.randperm(x.size(0), device=x.device)
-    #     unshuffle_indices = torch.argsort(shuffle_indices)
-    #     shuffled = x[shuffle_indices, :, :]
-    #     norm_shuffled = self.layer_norm_1(shuffled)
-    #     identity_x = shuffled[:identity_count, :, :]
-    #     process_x = shuffled[identity_count:, :, :]
-    #     residual = process_x
-
-    #     if self.pre_norm:
-    #         process_x = norm_shuffled[identity_count:, :, :]
-
-    #     process_x = residual + self.attn(process_x, process_x, process_x)
-    #     residual = process_x
-
-    #     shuffled = torch.cat([identity_x, process_x])
-    #     norm_shuffled = self.layer_norm_2(shuffled)
-
-    #     if self.pre_norm:
-    #         residual = process_x # residual NOT normed
-    #         process_x = norm_shuffled[identity_count:, :, :]
-
-    #     if self.post_norm:
-    #         process_x = norm_shuffled[identity_count:, :, :]
-    #         residual = process_x # residual normed
-
-    #     process_x = residual + self.ff(process_x) # handles residual connection
-
-    #     x = torch.cat([identity_x, process_x])[unshuffle_indices, :, :].contiguous()
-
-    #     return x if not self.post_norm else self.layer_norm_3(x)
-
 
 class TransformerEncoder(nn.Module):
     """
@@ -452,6 +417,8 @@ class TransformerEncoder(nn.Module):
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
+        ff_linear_module_up=None,
+        ff_linear_module_down=None,
         mlp_dropout=0.0,
         msa_dropout=0.0,
         stochastic_depth=0.0,
@@ -515,6 +482,8 @@ class TransformerEncoder(nn.Module):
                     mlp_ratio=mlp_ratio,
                     activation=activation,
                     activation_kwargs=activation_kwargs,
+                    ff_linear_module_up=ff_linear_module_up,
+                    ff_linear_module_down=ff_linear_module_down,
                     mlp_dropout=mlp_dropout,
                     msa_dropout=msa_dropout,
                     identity_probability=self.stochastic_depth_probabilities[i],

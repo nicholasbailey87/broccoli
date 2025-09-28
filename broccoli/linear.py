@@ -131,8 +131,7 @@ class WeightNormedLinear(nn.Module):
         return F.linear(x, self.weights(), self.bias)
 
     def __repr__(self) -> str:
-        # Optional: A nice representation for printing the module.
         return (
-            f"AnchoredLinear(in_features={self.in_features},"
+            f"WeightNormedLinear(in_features={self.in_features},"
             f"out_features={self.out_features}, bias={self.use_bias})"
         )

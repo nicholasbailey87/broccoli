@@ -132,6 +132,8 @@ class ViTEncoder(nn.Module):
         transformer_return_bos_tokens=False,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
+        transformer_ff_linear_module_up=None,
+        transformer_ff_linear_module_down=None,
         transformer_mlp_dropout=0.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
@@ -282,6 +284,8 @@ class ViTEncoder(nn.Module):
                 mlp_ratio=transformer_mlp_ratio,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
+                ff_linear_module_up=transformer_ff_linear_module_up,
+                ff_linear_module_down=transformer_ff_linear_module_down,
                 mlp_dropout=transformer_mlp_dropout,
                 msa_dropout=transformer_msa_dropout,
                 stochastic_depth=transformer_stochastic_depth,
@@ -305,14 +309,16 @@ class ViTEncoder(nn.Module):
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=transformer_mlp_dropout,
                 linear_module_up=(
+                    # First truthy assigned value
                     transformer_initial_ff_linear_module_up
-                    if transformer_initial_ff_linear_module_up is not None
-                    else linear_module
+                    or transformer_ff_linear_module_up
+                    or linear_module
                 ),
                 linear_module_down=(
+                    # First truthy assigned value
                     transformer_initial_ff_linear_module_down
-                    if transformer_initial_ff_linear_module_down is not None
-                    else linear_module
+                    or transformer_ff_linear_module_down
+                    or linear_module
                 ),
                 pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
@@ -386,6 +392,8 @@ class ViT(nn.Module):
         transformer_return_bos_tokens=False,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
+        transformer_ff_linear_module_up=None,
+        transformer_ff_linear_module_down=None,
         transformer_mlp_dropout=0.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
@@ -446,6 +454,8 @@ class ViT(nn.Module):
             transformer_return_bos_tokens=transformer_return_bos_tokens,
             transformer_activation=transformer_activation,
             transformer_activation_kwargs=transformer_activation_kwargs,
+            transformer_ff_linear_module_up=transformer_ff_linear_module_up,
+            transformer_ff_linear_module_down=transformer_ff_linear_module_down,
             transformer_mlp_dropout=transformer_mlp_dropout,
             transformer_msa_dropout=transformer_msa_dropout,
             transformer_stochastic_depth=transformer_stochastic_depth,
