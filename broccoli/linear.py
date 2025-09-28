@@ -34,7 +34,8 @@ class SpectralNormLinear(nn.Module):
 
     def reset_parameters(self) -> None:
         weights = torch.empty(self.out_features, self.in_features)
-        nn.init.kaiming_uniform_(weights, a=math.sqrt(5))
+        stdv = 1.0 / math.sqrt(self.in_features)
+        nn.init.uniform_(weights, a=-stdv, b=stdv)
         if self.use_bias:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(weights)
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
@@ -77,7 +78,8 @@ class AnchoredLinear(nn.Module):
 
     def reset_parameters(self) -> None:
         weights = torch.empty(self.out_features, self.in_features)
-        nn.init.kaiming_uniform_(weights, a=math.sqrt(5))
+        stdv = 1.0 / math.sqrt(self.in_features)
+        nn.init.uniform_(weights, a=-stdv, b=stdv)
         if self.use_bias:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(weights)
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
@@ -120,7 +122,8 @@ class WeightNormedLinear(nn.Module):
 
     def reset_parameters(self) -> None:
         weights = torch.empty(self.out_features, self.in_features)
-        nn.init.kaiming_uniform_(weights, a=math.sqrt(5))
+        stdv = 1.0 / math.sqrt(self.in_features)
+        nn.init.uniform_(weights, a=-stdv, b=stdv)
         if self.use_bias:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(weights)
             bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
