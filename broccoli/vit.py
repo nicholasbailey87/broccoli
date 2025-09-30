@@ -120,6 +120,7 @@ class ViTEncoder(nn.Module):
         transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
+        transformer_initial_ff_mlp_dropout=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
         transformer_post_norm=False,
@@ -307,7 +308,12 @@ class ViTEncoder(nn.Module):
                 transformer_embedding_size,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
-                dropout=transformer_mlp_dropout,
+                dropout=(
+                    # First truthy assigned value
+                    transformer_initial_ff_mlp_dropout
+                    if transformer_initial_ff_mlp_dropout is not None
+                    else transformer_mlp_dropout
+                ),
                 linear_module_up=(
                     # First truthy assigned value
                     transformer_initial_ff_linear_module_up
@@ -349,11 +355,7 @@ class ViTEncoder(nn.Module):
 
 class ViT(nn.Module):
     """
-    Denoising convolutional transformer
-    Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
-        *''Escaping the Big Data Paradigm with Compact Transformers''*](
-        https://arxiv.org/abs/2104.05704). It's a convolutional neural network
-        leading into a transformer encoder, followed by a sequence pooling layer.
+    ...
     """
 
     def __init__(
@@ -380,6 +382,7 @@ class ViT(nn.Module):
         transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
+        transformer_initial_ff_mlp_dropout=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
         transformer_post_norm=False,
@@ -442,6 +445,7 @@ class ViT(nn.Module):
             transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
             transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
             transformer_initial_ff_linear_module_down=transformer_initial_ff_linear_module_down,
+            transformer_initial_ff_mlp_dropout=transformer_initial_ff_mlp_dropout,
             transformer_pre_norm=transformer_pre_norm,
             transformer_normformer=transformer_normformer,
             transformer_post_norm=transformer_post_norm,
