@@ -73,7 +73,15 @@ class MHAttention(nn.Module):
         bos_tokens=0,
         rotary_embedding=None,
         source_size=None,
+        scaling="d",
     ):
+        """
+        Args:
+            scaling: how should the attention logits be scaled? Can be "sqrtd"
+                to mimic the original Attention is All You Need approach of
+                dividing by the sqrt of the embedding Dimension or "d" per
+                "Tensor Programs V...". Default "d"
+        """
         super().__init__()
 
         if rotary_embedding is not None:
@@ -84,6 +92,7 @@ class MHAttention(nn.Module):
         self.embed_dim = embed_dim
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
+        self.scaling = scaling
 
         self.head_dim = self.embed_dim // self.n_heads
 
@@ -207,7 +216,12 @@ class MHAttention(nn.Module):
 
         qk_scores = q @ k.transpose(-1, -2)
 
-        qk_scores /= math.sqrt(self.head_dim)
+        if self.scaling == "sqrtd":
+            qk_scores /= math.sqrt(self.head_dim)
+        elif self.scaling == "d":
+            qk_scores /= self.head_dim
+        else:
+            raise ValueError('`scaling` argument to MHAttention must be "d" or "sqrtd"')
 
         # Apply mask if causal (must come before softmax)
         if self.causal:
@@ -305,6 +319,7 @@ class TransformerBlock(nn.Module):
         activation_kwargs: Optional[dict] = None,
         ff_linear_module_up=None,
         ff_linear_module_down=None,
+        msa_scaling="d",
         mlp_dropout=0.0,
         msa_dropout=0.0,
         identity_probability=0.0,
@@ -314,6 +329,14 @@ class TransformerBlock(nn.Module):
         post_norm=False,
         normformer=False,
     ):
+        """
+        Args:
+            msa_scaling: how should the attention logits be scaled? Can be "sqrtd"
+                to mimic the original Attention is All You Need approach of
+                dividing by the sqrt of the embedding Dimension or "d" per
+                "Tensor Programs V...". Default "d"
+        """
+
         super().__init__()
 
         self.pre_norm = pre_norm
@@ -348,6 +371,7 @@ class TransformerBlock(nn.Module):
             rotary_embedding=self.rotary_embedding,
             source_size=source_size,
             bos_tokens=bos_tokens,
+            scaling=msa_scaling,
         )
 
         # Submodule for the feedforward process
@@ -429,9 +453,21 @@ class TransformerEncoder(nn.Module):
         pre_norm=True,
         post_norm=False,
         normformer=False,
+        msa_scaling="d",
     ):
-        if position_embedding_type == "relative":
-            assert source_size is not None  # TODO: make this a proper exception
+        """
+        Args:
+            msa_scaling: how should the attention logits be scaled? Can be "sqrtd"
+                to mimic the original Attention is All You Need approach of
+                dividing by the sqrt of the embedding Dimension or "d" per
+                "Tensor Programs V...". Default "d"
+        """
+
+        if (position_embedding_type == "relative") and (source_size is None):
+            raise ValueError(
+                "`source_size` for TransformerEncoder cannot be None if"
+                " `position_embedding_type` is relative"
+            )
 
         super().__init__()
         self.seq_len = seq_len
@@ -461,7 +497,8 @@ class TransformerEncoder(nn.Module):
         self.msa_dropout = msa_dropout
         self.stochastic_depth = stochastic_depth
 
-        assert isinstance(n_layers, int)  # XXX: make this a proper Exception
+        assert isinstance(n_layers, int)
+
         if n_layers == 1:
             self.stochastic_depth_probabilities = [0.0]
         else:
@@ -484,6 +521,7 @@ class TransformerEncoder(nn.Module):
                     activation_kwargs=activation_kwargs,
                     ff_linear_module_up=ff_linear_module_up,
                     ff_linear_module_down=ff_linear_module_down,
+                    msa_scaling=msa_scaling,
                     mlp_dropout=mlp_dropout,
                     msa_dropout=msa_dropout,
                     identity_probability=self.stochastic_depth_probabilities[i],
