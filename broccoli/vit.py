@@ -53,12 +53,20 @@ class ClassificationHead(nn.Module):
     A general classification head for a ViT
     """
 
-    def __init__(self, d_model, linear_module, n_classes, batch_norm=True):
+    def __init__(
+        self,
+        d_model,
+        n_classes,
+        linear_module=nn.Linear,
+        logit_projection_layer=nn.Linear,
+        batch_norm_logits=True,
+    ):
         super().__init__()
         self.d_model = d_model
         self.summarize = GetCLSToken()
-        self.projection = linear_module(d_model, n_classes)
-        if batch_norm:
+        self.projection = logit_projection_layer(d_model, n_classes)
+
+        if batch_norm_logits:
             self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
         else:
             self.batch_norm = nn.Identity()
@@ -83,7 +91,7 @@ class SequencePoolClassificationHead(ClassificationHead):
     """
 
     def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
-        super().__init__(d_model, linear_module, out_dim, batch_norm=batch_norm)
+        super().__init__(d_model, linear_module, out_dim, batch_norm_logits=batch_norm)
         self.summarize = SequencePool(d_model, linear_module)
         # Rebuild the classification process with the correct summary module:
         self.classification_process = nn.Sequential(
@@ -411,9 +419,10 @@ class ViT(nn.Module):
         transformer_mlp_dropout=0.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
-        batch_norm_outputs=True,
-        linear_module=SpectralNormLinear,
         head=SequencePoolClassificationHead,
+        batch_norm_logits=True,
+        logit_projection_layer=nn.Linear,
+        linear_module=nn.Linear,
     ):
 
         super().__init__()
@@ -480,9 +489,10 @@ class ViT(nn.Module):
 
         self.pool = head(
             transformer_embedding_size,
-            linear_module,
             image_classes,
-            batch_norm=batch_norm_outputs,
+            linear_module=linear_module,
+            logit_projection_layer=logit_projection_layer,
+            batch_norm=batch_norm_logits,
         )
 
     @property
