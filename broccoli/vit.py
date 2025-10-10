@@ -90,8 +90,22 @@ class SequencePoolClassificationHead(ClassificationHead):
         as a generalisation of average pooling.
     """
 
-    def __init__(self, d_model, linear_module, out_dim, batch_norm=True):
-        super().__init__(d_model, linear_module, out_dim, batch_norm_logits=batch_norm)
+    def __init__(
+        self,
+        d_model,
+        n_classes,
+        linear_module=nn.Linear,
+        logit_projection_layer=nn.Linear,
+        batch_norm_logits=True,
+    ):
+        super().__init__(
+            d_model,
+            n_classes,
+            linear_module=linear_module,
+            logit_projection_layer=logit_projection_layer,
+            batch_norm_logits=batch_norm_logits,
+        )
+
         self.summarize = SequencePool(d_model, linear_module)
         # Rebuild the classification process with the correct summary module:
         self.classification_process = nn.Sequential(
