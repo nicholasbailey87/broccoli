@@ -219,7 +219,8 @@ class MHAttention(nn.Module):
         if self.scaling == "sqrtd":
             qk_scores /= math.sqrt(self.head_dim)
         elif self.scaling == "d":
-            qk_scores /= self.head_dim
+            # for backwards compatibility, per https://github.com/microsoft/mup
+            qk_scores *= 8 / self.head_dim
         else:
             raise ValueError('`scaling` argument to MHAttention must be "d" or "sqrtd"')
 
