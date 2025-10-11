@@ -506,7 +506,7 @@ class ViT(nn.Module):
             image_classes,
             linear_module=linear_module,
             logit_projection_layer=logit_projection_layer,
-            batch_norm=batch_norm_logits,
+            batch_norm_logits=batch_norm_logits,
         )
 
     @property
