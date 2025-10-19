@@ -1,7 +1,5 @@
 import math
-from collections import OrderedDict
 from typing import Optional
-from numpy import random
 
 import torch
 import torch.nn as nn
@@ -10,7 +8,6 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from .rope import RotaryEmbedding, apply_rotary_emb
-from .linear import AnchoredLinear, SpectralNormLinear
 
 
 def drop_path(

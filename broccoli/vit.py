@@ -4,9 +4,10 @@ from typing import Optional
 from .transformer import TransformerEncoder, FeedforwardBlock
 from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
 from .activation import ReLU, SquaredReLU, GELU, SwiGLU
-from .linear import SpectralNormLinear
+
 from einops import einsum
 from einops.layers.torch import Rearrange
+
 import torch.nn as nn
 import torch.nn.functional as F
 
