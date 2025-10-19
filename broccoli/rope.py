@@ -31,15 +31,23 @@ from math import pi
 
 import torch
 
+from torch.nn import Module
+from torch import nn, einsum, broadcast_tensors, is_tensor, tensor, Tensor
+
+# Gracefully find the best way to import autocast
 try:
-    # Ideal: For PyTorch 1.10+
-    from torch.amp import autocast
+    from torch.amp import autocast as autocast_factory
 except ImportError:
     # Fallback: For PyTorch 1.6 to 1.9
     from torch.cuda.amp import autocast
 
-from torch.nn import Module
-from torch import nn, einsum, broadcast_tensors, is_tensor, tensor, Tensor
+    def autocast_factory(_, enabled=True, dtype=None):
+        """
+        A wrapper that mimics the modern autocast signature but calls the older
+        torch.cuda.amp.autocast, ignoring the device_type argument.
+        """
+        return autocast(enabled=enabled, dtype=dtype)
+
 
 from einops import rearrange, repeat
 
@@ -81,7 +89,7 @@ def rotate_half(x):
     return rearrange(x, "... d r -> ... (d r)")
 
 
-@autocast("cuda", enabled=False)
+@autocast_factory("cuda", enabled=False)
 def apply_rotary_emb(
     freqs, t, start_index=0, scale=1.0, seq_dim=-2, freqs_seq_dim=None
 ):
@@ -370,7 +378,7 @@ class RotaryEmbedding(Module):
         all_freqs = broadcast_tensors(*all_freqs)
         return torch.cat(all_freqs, dim=-1)
 
-    @autocast("cuda", enabled=False)
+    @autocast_factory("cuda", enabled=False)
     def forward(self, t: Tensor, seq_len: int | None = None, offset=0):
         should_cache = (
             self.cache_if_possible
