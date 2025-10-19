@@ -64,7 +64,11 @@ class ClassificationHead(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.summarize = GetCLSToken()
-        self.projection = logit_projection_layer(d_model, n_classes)
+
+        if logit_projection_layer is not None:
+            self.projection = logit_projection_layer(d_model, n_classes)
+        else:
+            self.projection = nn.Identity()
 
         if batch_norm_logits:
             self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
