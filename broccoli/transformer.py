@@ -309,7 +309,7 @@ class TransformerBlock(nn.Module):
         seq_len,
         d_model,
         n_heads,
-        position_embedding_type="absolute",  # absolute or relative
+        relative_position_embedding=False,
         source_size=None,
         bos_tokens=0,
         mlp_ratio=4,
@@ -347,7 +347,7 @@ class TransformerBlock(nn.Module):
         self.layer_norm_2 = nn.LayerNorm(d_model)
         self.layer_norm_3 = nn.LayerNorm(d_model)
 
-        if position_embedding_type == "relative":
+        if relative_position_embedding:
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
             if d_model < 16:
                 dim = d_model
@@ -434,7 +434,8 @@ class TransformerEncoder(nn.Module):
         d_model,
         n_layers,
         n_heads,
-        position_embedding_type="absolute",  # absolute or relative
+        absolute_position_embedding=True,
+        relative_position_embedding=False,
         source_size=None,
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
@@ -461,7 +462,7 @@ class TransformerEncoder(nn.Module):
                 "Tensor Programs V...". Default "d"
         """
 
-        if (position_embedding_type == "relative") and (source_size is None):
+        if relative_position_embedding and (source_size is None):
             raise ValueError(
                 "`source_size` for TransformerEncoder cannot be None if"
                 " `position_embedding_type` is relative"
@@ -484,12 +485,12 @@ class TransformerEncoder(nn.Module):
 
         self.d_model = d_model
 
-        self.position_embedding_type = position_embedding_type
-
-        if self.position_embedding_type == "absolute":
+        if absolute_position_embedding:
             self.absolute_position_embedding = nn.Embedding(
                 self.full_sequence_length, d_model
             )
+        else:
+            self.absolute_position_embedding = None
 
         self.mlp_dropout = mlp_dropout
         self.msa_dropout = msa_dropout
@@ -511,7 +512,7 @@ class TransformerEncoder(nn.Module):
                     self.full_sequence_length,
                     d_model,
                     n_heads,
-                    position_embedding_type=position_embedding_type,
+                    relative_position_embedding=relative_position_embedding,
                     source_size=source_size,
                     bos_tokens=bos_tokens,
                     mlp_ratio=mlp_ratio,
@@ -543,7 +544,7 @@ class TransformerEncoder(nn.Module):
         else:
             x = x
 
-        if self.position_embedding_type == "absolute":
+        if self.absolute_position_embedding is not None:
             x = x + self.absolute_position_embedding(
                 torch.arange(
                     0, self.full_sequence_length, dtype=torch.long, device=x.device
