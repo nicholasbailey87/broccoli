@@ -58,6 +58,7 @@ class ClassificationHead(nn.Module):
         self,
         d_model,
         n_classes,
+        linear_module=nn.Linear,
         logit_projection_layer=nn.Linear,
         batch_norm_logits=True,
     ):
@@ -98,17 +99,19 @@ class SequencePoolClassificationHead(ClassificationHead):
         self,
         d_model,
         n_classes,
+        linear_module=nn.Linear,
         logit_projection_layer=nn.Linear,
         batch_norm_logits=True,
     ):
         super().__init__(
             d_model,
             n_classes,
+            linear_module=linear_module,
             logit_projection_layer=logit_projection_layer,
             batch_norm_logits=batch_norm_logits,
         )
 
-        self.summarize = SequencePool(d_model, logit_projection_layer)
+        self.summarize = SequencePool(d_model, linear_module)
         # Rebuild the classification process with the correct summary module:
         self.classification_process = nn.Sequential(
             *[
@@ -510,6 +513,7 @@ class ViT(nn.Module):
         self.pool = head(
             transformer_embedding_size,
             image_classes,
+            linear_module=linear_module,
             logit_projection_layer=logit_projection_layer,
             batch_norm_logits=batch_norm_logits,
         )
