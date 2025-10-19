@@ -27,10 +27,17 @@ SOFTWARE.
 """
 
 from __future__ import annotations
-from math import pi, log
+from math import pi
 
 import torch
-from torch.amp import autocast
+
+try:
+    # Ideal: For PyTorch 1.10+
+    from torch.amp import autocast
+except ImportError:
+    # Fallback: For PyTorch 1.6 to 1.9
+    from torch.cuda.amp import autocast
+
 from torch.nn import Module
 from torch import nn, einsum, broadcast_tensors, is_tensor, tensor, Tensor
 
