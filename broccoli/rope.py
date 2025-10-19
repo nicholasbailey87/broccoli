@@ -41,12 +41,12 @@ except ImportError:
     # Fallback: For PyTorch 1.6 to 1.9
     from torch.cuda.amp import autocast
 
-    def autocast_factory(_, enabled=True, dtype=None):
+    def autocast_factory(_, enabled=True):
         """
         A wrapper that mimics the modern autocast signature but calls the older
         torch.cuda.amp.autocast, ignoring the device_type argument.
         """
-        return autocast(enabled=enabled, dtype=dtype)
+        return autocast(enabled=enabled)
 
 
 from einops import rearrange, repeat
