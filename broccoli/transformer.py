@@ -4,10 +4,19 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from einops import rearrange
 
 from .rope import RotaryEmbedding, apply_rotary_emb
+
+try:
+    from flash_attn import flash_attn_func
+
+    FLASH_ATTN = True
+except ImportError:
+    pass
+    FLASH_ATTN = False
 
 
 def drop_path(
@@ -206,32 +215,53 @@ class MHAttention(nn.Module):
             q = torch.cat([q_bos, q_img], dim=1)
             k = torch.cat([k_bos, k_img], dim=1)
 
-        # Divide Q/K/V into heads
-        q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
-        k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
-        v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
-
-        qk_scores = q @ k.transpose(-1, -2)
-
         if self.scaling == "sqrtd":
-            qk_scores /= math.sqrt(self.head_dim)
+            scaling_factor = 1 / math.sqrt(self.head_dim)
         elif self.scaling == "d":
             # for backwards compatibility, per https://github.com/microsoft/mup
-            qk_scores *= 8 / self.head_dim
+            scaling_factor = 8 / self.head_dim
         else:
             raise ValueError('`scaling` argument to MHAttention must be "d" or "sqrtd"')
 
-        # Apply mask if causal (must come before softmax)
-        if self.causal:
-            qk_scores.masked_fill_(self.mask, float("-inf"))
+        if FLASH_ATTN:
+            # Divide Q/K/V into heads
+            q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
+            k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
+            v = rearrange(v, "b t (h d) -> b t h d", h=self.n_heads)
 
-        qk_scores = F.softmax(qk_scores, dim=-1)
+            output_with_heads = flash_attn_func(
+                q,
+                k,
+                v,
+                dropout_p=self.dropout if self.training else 0.0,
+                softmax_scale=scaling_factor,
+                causal=self.causal,
+            )
 
-        output_with_heads = qk_scores @ v
+            output_without_heads = rearrange(output_with_heads, "b t h d -> b t (h d)")
 
-        output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
+            return self.out_proj(output_without_heads)
+        else:
+            # Divide Q/K/V into heads
+            q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
+            k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
+            v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
 
-        return self.out_proj(output_without_heads)
+            qk_scores = q @ k.transpose(-1, -2)
+
+            qk_scores *= scaling_factor
+
+            # Apply mask if causal (must come before softmax)
+            if self.causal:
+                qk_scores.masked_fill_(self.mask, float("-inf"))
+
+            qk_scores = F.softmax(qk_scores, dim=-1)
+
+            output_with_heads = qk_scores @ v
+
+            output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
+
+            return self.out_proj(output_without_heads)
 
 
 class FeedforwardBlock(nn.Module):
@@ -410,21 +440,20 @@ class TransformerBlock(nn.Module):
     def forward(self, x):
 
         if self.pre_norm:
-            normx = self.layer_norm_1(x)
-            x = x + self.drop_path(self.attn(normx, normx, normx))
-            normx = self.layer_norm_2(x)
-            x = x + self.drop_path(self.ff(normx))
-        elif self.post_norm:
+            x = self.layer_norm_1(x)
+            x = x + self.drop_path(self.attn(x, x, x))
+            x = self.layer_norm_2(x)
+            x = x + self.drop_path(checkpoint(self.ff, x, use_reentrant=False))
+            if self.post_norm:  # i.e. in addition! Pre and post.
+                x = self.layer_norm_3(x)
+        elif self.post_norm:  # i.e. only, not prenorm, just post
             x = x + self.drop_path(self.attn(x, x, x))
             x = self.layer_norm_1(x)
-            x = x + self.drop_path(self.ff(x))
+            x = x + self.drop_path(checkpoint(self.ff, x, use_reentrant=False))
             x = self.layer_norm_2(x)
-        else:
+        else:  # Not pre or post norm. Stand well back.
             x = x + self.drop_path(self.attn(x, x, x))
-            x = x + self.drop_path(self.ff(x))
-
-        if self.pre_norm and self.post_norm:
-            x = self.layer_norm_3(x)
+            x = x + self.drop_path(checkpoint(self.ff, x, use_reentrant=False))
 
         return x
 
