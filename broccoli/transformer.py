@@ -233,7 +233,7 @@ class MHAttention(nn.Module):
                 q,
                 k,
                 v,
-                dropout_p=self.dropout if self.training else 0.0,
+                dropout_p=self.dropout.p if self.training else 0.0,
                 softmax_scale=scaling_factor,
                 causal=self.causal,
             )
@@ -256,6 +256,8 @@ class MHAttention(nn.Module):
                 qk_scores.masked_fill_(self.mask, float("-inf"))
 
             qk_scores = F.softmax(qk_scores, dim=-1)
+
+            qk_scores = self.dropout(qk_scores)
 
             output_with_heads = qk_scores @ v
 
