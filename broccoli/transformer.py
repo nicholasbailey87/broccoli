@@ -285,9 +285,11 @@ class FeedforwardBlock(nn.Module):
         normformer=False,
         post_norm=True,
         residual_path=True,
+        checkpoint=True,
     ):
         super().__init__()
 
+        self.checkpoint = checkpoint
         self.residual_path = residual_path
         self.post_norm = post_norm
 
@@ -326,12 +328,18 @@ class FeedforwardBlock(nn.Module):
         )
 
     def forward(self, x):
-        if self.residual_path and self.post_norm:
-            return self.layernorm(x + self.process(x))
-        elif self.residual_path:
-            return x + self.process(x)
+
+        if self.checkpoint:
+            processed = checkpoint(self.process, x, use_reentrant=False)
         else:
-            return self.process(x)
+            processed = self.process(x)
+
+        if self.residual_path and self.post_norm:
+            return self.layernorm(x + processed)
+        elif self.residual_path:
+            return x + processed
+        else:
+            return processed
 
 
 class TransformerBlock(nn.Module):
@@ -365,6 +373,7 @@ class TransformerBlock(nn.Module):
         pre_norm=True,
         post_norm=False,
         normformer=False,
+        checkpoint_ff=True,
     ):
         """
         Args:
@@ -433,6 +442,7 @@ class TransformerBlock(nn.Module):
             normformer=normformer,
             post_norm=False,  # Handled outside the block
             residual_path=False,  # Handled outside the block
+            checkpoint=checkpoint_ff,
         )
 
     @property
@@ -445,17 +455,17 @@ class TransformerBlock(nn.Module):
             x = self.layer_norm_1(x)
             x = x + self.drop_path(self.attn(x, x, x))
             x = self.layer_norm_2(x)
-            x = x + self.drop_path(checkpoint(self.ff, x, use_reentrant=False))
+            x = x + self.drop_path(self.ff(x))
             if self.post_norm:  # i.e. in addition! Pre and post.
                 x = self.layer_norm_3(x)
         elif self.post_norm:  # i.e. only, not prenorm, just post
             x = x + self.drop_path(self.attn(x, x, x))
             x = self.layer_norm_1(x)
-            x = x + self.drop_path(checkpoint(self.ff, x, use_reentrant=False))
+            x = x + self.drop_path(self.ff(x))
             x = self.layer_norm_2(x)
         else:  # Not pre or post norm. Stand well back.
             x = x + self.drop_path(self.attn(x, x, x))
-            x = x + self.drop_path(checkpoint(self.ff, x, use_reentrant=False))
+            x = x + self.drop_path(self.ff(x))
 
         return x
 
@@ -491,6 +501,7 @@ class TransformerEncoder(nn.Module):
         post_norm=False,
         normformer=False,
         msa_scaling="d",
+        checkpoint_ff=True,
     ):
         """
         Args:
@@ -567,6 +578,7 @@ class TransformerEncoder(nn.Module):
                     pre_norm=pre_norm,
                     post_norm=post_norm,
                     normformer=normformer,
+                    checkpoint_ff=checkpoint_ff,
                 )
                 for i in range(n_layers)
             ]
