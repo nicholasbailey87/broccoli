@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -102,6 +102,15 @@ class MHAttention(nn.Module):
 
         self.head_dim = self.embed_dim // self.n_heads
 
+        if self.scaling == "sqrtd":
+            self.scaling_factor = 1 / math.sqrt(self.head_dim)
+        elif self.scaling == "d":
+            # 8/d_model for backwards compatibility,
+            #     per https://github.com/microsoft/mup
+            self.scaling_factor = 8 / self.head_dim
+        else:
+            raise ValueError('`scaling` argument to MHAttention must be "d" or "sqrtd"')
+
         self.q_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
@@ -122,6 +131,8 @@ class MHAttention(nn.Module):
         self.source_size = source_size
         self.bos_tokens = bos_tokens
 
+        self.reset_parameters()
+
     @property
     def _kv_distance(self) -> float:
         """
@@ -141,7 +152,71 @@ class MHAttention(nn.Module):
 
         return 1 - similarity
 
-    def forward(self, q, k, v):
+    def add_axial_rope(
+        self, q: torch.Tensor, k: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Apply Axial RoPE to all tokens except BOS tokens
+        """
+
+        if len(self.source_size) == 1:
+            spatial_dimension_names = "D1"
+            spatial_dimension_values = {"D1": self.source_size[0]}
+        elif len(self.source_size) == 2:
+            spatial_dimension_names = "D1 D2"
+            spatial_dimension_values = {
+                "D1": self.source_size[0],
+                "D2": self.source_size[1],
+            }
+        elif len(self.source_size) == 3:
+            spatial_dimension_names = "D1 D2 D3"
+            spatial_dimension_values = {
+                "D1": self.source_size[0],
+                "D2": self.source_size[1],
+                "D3": self.source_size[2],
+            }
+        else:
+            raise NotImplementedError(
+                "`source_size` must be a tuple of 1, 2 or 3 integers"
+            )
+
+        q_bos, q_img = q[:, : self.bos_tokens, :], q[:, self.bos_tokens :, :]
+        k_bos, k_img = k[:, : self.bos_tokens, :], k[:, self.bos_tokens :, :]
+
+        q_img = rearrange(
+            q_img,
+            f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
+            **spatial_dimension_values,
+        )
+        k_img = rearrange(
+            k_img,
+            f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
+            **spatial_dimension_values,
+        )
+
+        freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
+
+        q_img = apply_rotary_emb(freqs, q_img)
+        k_img = apply_rotary_emb(freqs, k_img)
+
+        q_img = rearrange(
+            q_img,
+            f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
+        )
+        k_img = rearrange(
+            k_img,
+            f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
+        )
+
+        # Re-combine the BOS tokens and the RoPE-enhanced image tokens
+        q = torch.cat([q_bos, q_img], dim=1)
+        k = torch.cat([k_bos, k_img], dim=1)
+
+        return q, k
+
+    def project_qkv(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         query_batch_size, query_tokens, query_features = q.size()
         key_batch_size, key_tokens, key_features = k.size()
 
@@ -154,74 +229,18 @@ class MHAttention(nn.Module):
 
         if self.causal:
             assert query_tokens == key_tokens
-            assert query_tokens == self.sequence_length
+            assert query_tokens == self.seq_len
 
-        # Project q, k and v
-        q = self.q_proj(q)
-        k = self.k_proj(k)
-        v = self.v_proj(v)
+        q, k, v = self.q_proj(q), self.k_proj(k), self.v_proj(v)
 
-        # Rearrange dimensions and add RoPE if needed
         if self.rotary_embedding is not None:
+            q, k = self.add_axial_rope(q, k)
 
-            if len(self.source_size) == 1:
-                spatial_dimension_names = "D1"
-                spatial_dimension_values = {"D1": self.source_size[0]}
-            elif len(self.source_size) == 2:
-                spatial_dimension_names = "D1 D2"
-                spatial_dimension_values = {
-                    "D1": self.source_size[0],
-                    "D2": self.source_size[1],
-                }
-            elif len(self.source_size) == 3:
-                spatial_dimension_names = "D1 D2 D3"
-                spatial_dimension_values = {
-                    "D1": self.source_size[0],
-                    "D2": self.source_size[1],
-                    "D3": self.source_size[2],
-                }
-            else:
-                raise NotImplementedError(
-                    "`source_size` must be a tuple of 1, 2 or 3 integers"
-                )
+        return q, k, v
 
-            q_bos, q_img = q[:, : self.bos_tokens, :], q[:, self.bos_tokens :, :]
-            k_bos, k_img = k[:, : self.bos_tokens, :], k[:, self.bos_tokens :, :]
+    def forward(self, q, k, v):
 
-            q_img = rearrange(
-                q_img,
-                f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
-                **spatial_dimension_values,
-            )
-            k_img = rearrange(
-                k_img,
-                f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
-                **spatial_dimension_values,
-            )
-            freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
-            q_img = apply_rotary_emb(freqs, q_img)
-            k_img = apply_rotary_emb(freqs, k_img)
-
-            q_img = rearrange(
-                q_img,
-                f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
-            )
-            k_img = rearrange(
-                k_img,
-                f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
-            )
-
-            # Re-combine the BOS tokens and the RoPE-enhanced image tokens
-            q = torch.cat([q_bos, q_img], dim=1)
-            k = torch.cat([k_bos, k_img], dim=1)
-
-        if self.scaling == "sqrtd":
-            scaling_factor = 1 / math.sqrt(self.head_dim)
-        elif self.scaling == "d":
-            # for backwards compatibility, per https://github.com/microsoft/mup
-            scaling_factor = 8 / self.head_dim
-        else:
-            raise ValueError('`scaling` argument to MHAttention must be "d" or "sqrtd"')
+        q, k, v = self.project_qkv(q, k, v)
 
         if FLASH_ATTN:
             # Divide Q/K/V into heads
@@ -234,7 +253,7 @@ class MHAttention(nn.Module):
                 k,
                 v,
                 dropout_p=self.dropout.p if self.training else 0.0,
-                softmax_scale=scaling_factor,
+                softmax_scale=self.scaling_factor,
                 causal=self.causal,
             )
 
@@ -249,7 +268,7 @@ class MHAttention(nn.Module):
 
             qk_scores = q @ k.transpose(-1, -2)
 
-            qk_scores *= scaling_factor
+            qk_scores *= self.scaling_factor
 
             # Apply mask if causal (must come before softmax)
             if self.causal:
@@ -264,6 +283,34 @@ class MHAttention(nn.Module):
             output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
 
             return self.out_proj(output_without_heads)
+
+    def attention_scores(self, q, k, v):
+
+        q, k, v = self.project_qkv(q, k, v)
+
+        # Divide Q/K/V into heads
+        q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
+        k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
+        v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
+
+        qk_scores = q @ k.transpose(-1, -2)
+
+        qk_scores *= self.scaling_factor
+
+        # Apply mask if causal (must come before softmax)
+        if self.causal:
+            qk_scores.masked_fill_(self.mask, float("-inf"))
+
+        qk_scores = F.softmax(qk_scores, dim=-1)
+
+        return qk_scores  # (batch, head, seq_len, seq_len)
+
+    def reset_parameters(self):
+        # Default nn.Linear init is kaiming_uniform, which is fine
+        self.q_proj.reset_parameters()
+        self.k_proj.reset_parameters()
+        self.v_proj.reset_parameters()
+        self.out_proj.reset_parameters()
 
 
 class FeedforwardBlock(nn.Module):
@@ -327,6 +374,8 @@ class FeedforwardBlock(nn.Module):
             ]
         )
 
+        self.reset_parameters()
+
     def forward(self, x):
 
         if self.checkpoint:
@@ -340,6 +389,15 @@ class FeedforwardBlock(nn.Module):
             return x + processed
         else:
             return processed
+
+    def reset_parameters(self):
+        if self.post_norm:
+            self.layernorm.reset_parameters()
+
+        # Iterate over the sequential block to reset parameters
+        for module in self.process:
+            if hasattr(module, "reset_parameters"):
+                module.reset_parameters()
 
 
 class TransformerBlock(nn.Module):
@@ -445,6 +503,8 @@ class TransformerBlock(nn.Module):
             checkpoint=checkpoint_ff,
         )
 
+        self.reset_parameters()
+
     @property
     def _kv_distance(self) -> float:
         return self.attn._kv_distance
@@ -469,11 +529,29 @@ class TransformerBlock(nn.Module):
 
         return x
 
+    def attention_scores(self, x):
+        """
+        Give back the attention scores used in this layer.
+        """
+        if self.pre_norm:
+            x = self.layer_norm_1(x)
+            return self.attn(x, x, x)
+        else:
+            return self.attn(x, x, x)
+
+    def reset_parameters(self):
+        self.layer_norm_1.reset_parameters()
+        self.layer_norm_2.reset_parameters()
+        self.layer_norm_3.reset_parameters()
+
+        self.attn.reset_parameters()
+        self.ff.reset_parameters()
+
 
 class TransformerEncoder(nn.Module):
     """
     This assumes we already get a sequence of embeddings (e.g. word or image
-        patch embeddings). It uses learned positional embeddings.
+        patch embeddings).
     """
 
     def __init__(
@@ -584,11 +662,13 @@ class TransformerEncoder(nn.Module):
             ]
         )
 
+        self.reset_parameters()
+
     @property
     def _kv_distances(self) -> float:
         return ",".join([str(block._kv_distance) for block in self.blocks])
 
-    def forward(self, x):
+    def preprocess(self, x):
         if self._bos_tokens:
             x = torch.cat([self._bos_embedding.expand(x.size(0), -1, -1), x], dim=1)
         else:
@@ -603,6 +683,10 @@ class TransformerEncoder(nn.Module):
                 )  # to shape (1, seq_len) to broadcast over batch
             )
 
+    def forward(self, x):
+
+        x = self.preprocess(x)
+
         for block in self.blocks:
             x = block(x)
 
@@ -610,3 +694,27 @@ class TransformerEncoder(nn.Module):
             return x[:, self._bos_tokens :, :]
         else:
             return x
+
+    def attention_scores(self, x):
+
+        x = self.preprocess(x)
+
+        layer_scores = []
+
+        for block in self.blocks:
+            # Get attention scores with shape (batch, 1, head, seq_len, seq_len)
+            layer_attention_scores = block.attention_scores(x).unsqueeze(1)
+            layer_scores.append(layer_attention_scores)
+            x = block(x)
+
+        return torch.cat(layer_scores, dim=1)  # (batch, layer, head, seq_len, seq_len)
+
+    def reset_parameters(self):
+        if self._bos_embedding is not None:
+            nn.init.normal_(self._bos_embedding, mean=0.0, std=1.0)
+
+        if self.absolute_position_embedding is not None:
+            self.absolute_position_embedding.reset_parameters()
+
+        for block in self.blocks:
+            block.reset_parameters()

@@ -9,7 +9,9 @@ from .utils import PadTensor
 from einops import einsum
 from einops.layers.torch import Rearrange
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class GetCLSToken(nn.Module):
@@ -31,9 +33,17 @@ class SequencePool(nn.Module):
             ]
         )
 
+        self.reset_parameters()
+
     def forward(self, x):
         weights = self.attention(x)
         return einsum(weights, x, "batch seq, batch seq d_model -> batch d_model")
+
+    def reset_parameters(self):
+        # Iterate over modules in the sequential block
+        for module in self.attention:
+            if hasattr(module, "reset_parameters"):
+                module.reset_parameters()
 
 
 class ClassificationHead(nn.Module):
@@ -71,8 +81,15 @@ class ClassificationHead(nn.Module):
             ]
         )
 
+        self.reset_parameters()
+
     def forward(self, x):
         return self.classification_process(x)
+
+    def reset_parameters(self):
+        for module in self.classification_process:
+            if hasattr(module, "reset_parameters"):
+                module.reset_parameters()
 
 
 class SequencePoolClassificationHead(ClassificationHead):
@@ -105,6 +122,8 @@ class SequencePoolClassificationHead(ClassificationHead):
                 self.batch_norm,
             ]
         )
+
+        self.reset_parameters()
 
 
 class ViTEncoder(nn.Module):
@@ -376,8 +395,19 @@ class ViTEncoder(nn.Module):
             ]
         )
 
+        self.reset_parameters()
+
     def forward(self, x):
         return self.encoder(x)
+
+    def attention_scores(self, x):
+        x = self.encoder[:-1](x)
+        return self.encoder[-1].attention_scores(x)
+
+    def reset_parameters(self):
+        for module in self.encoder:
+            if hasattr(module, "reset_parameters"):
+                module.reset_parameters()
 
 
 class ViT(nn.Module):
@@ -507,9 +537,26 @@ class ViT(nn.Module):
             batch_norm_logits=batch_norm_logits,
         )
 
+        self.reset_parameters()
+
     @property
     def sequence_length(self):
         return self.encoder.sequence_length
 
     def forward(self, x):
         return self.pool(self.encoder(x))
+
+    def attention_scores(self, x):
+        return self.encoder.attention_scores(x)
+
+    def head_to_bos_token_attention(self, x):
+        all_attention = self.attention_scores(x)
+        batch_averages = torch.mean(all_attention, dim=0, keepdim=False)
+        sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
+        n_bos_tokens = self.encoder.encoder._bos_tokens
+        just_bos = sequence_averages[:, :, :n_bos_tokens]
+        return F.softmax(just_bos, dim=-1)  # (layer, head, bos_token)
+
+    def reset_parameters(self):
+        self.encoder.reset_parameters()
+        self.pool.reset_parameters()
