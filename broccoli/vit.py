@@ -555,7 +555,7 @@ class ViT(nn.Module):
         sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
         n_bos_tokens = self.encoder.encoder[-1]._bos_tokens
         just_bos = sequence_averages[:, :, :n_bos_tokens]
-        return F.softmax(just_bos, dim=-1)  # (layer, head, bos_token)
+        return F.softmax(just_bos, dim=1)  # (layer, head, bos_token)
 
     def reset_parameters(self):
         self.encoder.reset_parameters()
