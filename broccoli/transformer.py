@@ -535,9 +535,9 @@ class TransformerBlock(nn.Module):
         """
         if self.pre_norm:
             x = self.layer_norm_1(x)
-            return self.attn(x, x, x)
+            return self.attn.attention_scores(x, x, x)
         else:
-            return self.attn(x, x, x)
+            return self.attn.attention_scores(x, x, x)
 
     def reset_parameters(self):
         self.layer_norm_1.reset_parameters()
@@ -682,6 +682,8 @@ class TransformerEncoder(nn.Module):
                     0
                 )  # to shape (1, seq_len) to broadcast over batch
             )
+
+        return x
 
     def forward(self, x):
 
