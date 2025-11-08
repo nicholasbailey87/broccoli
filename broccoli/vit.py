@@ -553,7 +553,7 @@ class ViT(nn.Module):
         all_attention = self.attention_scores(x)
         batch_averages = torch.mean(all_attention, dim=0, keepdim=False)
         sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
-        n_bos_tokens = self.encoder.encoder._bos_tokens
+        n_bos_tokens = self.encoder.encoder[-1]._bos_tokens
         just_bos = sequence_averages[:, :, :n_bos_tokens]
         return F.softmax(just_bos, dim=-1)  # (layer, head, bos_token)
 
