@@ -400,9 +400,9 @@ class ViTEncoder(nn.Module):
     def forward(self, x):
         return self.encoder(x)
 
-    def attention_scores(self, x):
+    def attention_logits(self, x):
         x = self.encoder[:-1](x)
-        return self.encoder[-1].attention_scores(x)
+        return self.encoder[-1].attention_logits(x)
 
     def reset_parameters(self):
         for module in self.encoder:
@@ -546,11 +546,11 @@ class ViT(nn.Module):
     def forward(self, x):
         return self.pool(self.encoder(x))
 
-    def attention_scores(self, x):
-        return self.encoder.attention_scores(x)
+    def attention_logits(self, x):
+        return self.encoder.attention_logits(x)
 
     def head_to_bos_token_attention(self, x):
-        all_attention = self.attention_scores(x)
+        all_attention = self.attention_logits(x)
         batch_averages = torch.mean(all_attention, dim=0, keepdim=False)
         sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
         n_bos_tokens = self.encoder.encoder[-1]._bos_tokens

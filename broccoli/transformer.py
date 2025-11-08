@@ -284,7 +284,7 @@ class MHAttention(nn.Module):
 
             return self.out_proj(output_without_heads)
 
-    def attention_scores(self, q, k, v):
+    def attention_logits(self, q, k, v):
 
         q, k, v = self.project_qkv(q, k, v)
 
@@ -300,8 +300,6 @@ class MHAttention(nn.Module):
         # Apply mask if causal (must come before softmax)
         if self.causal:
             qk_scores.masked_fill_(self.mask, float("-inf"))
-
-        qk_scores = F.softmax(qk_scores, dim=-1)
 
         return qk_scores  # (batch, head, seq_len, seq_len)
 
@@ -529,15 +527,15 @@ class TransformerBlock(nn.Module):
 
         return x
 
-    def attention_scores(self, x):
+    def attention_logits(self, x):
         """
         Give back the attention scores used in this layer.
         """
         if self.pre_norm:
             x = self.layer_norm_1(x)
-            return self.attn.attention_scores(x, x, x)
+            return self.attn.attention_logits(x, x, x)
         else:
-            return self.attn.attention_scores(x, x, x)
+            return self.attn.attention_logits(x, x, x)
 
     def reset_parameters(self):
         self.layer_norm_1.reset_parameters()
@@ -697,7 +695,7 @@ class TransformerEncoder(nn.Module):
         else:
             return x
 
-    def attention_scores(self, x):
+    def attention_logits(self, x):
 
         x = self.preprocess(x)
 
@@ -705,8 +703,8 @@ class TransformerEncoder(nn.Module):
 
         for block in self.blocks:
             # Get attention scores with shape (batch, 1, head, seq_len, seq_len)
-            layer_attention_scores = block.attention_scores(x).unsqueeze(1)
-            layer_scores.append(layer_attention_scores)
+            layer_attention_logits = block.attention_logits(x).unsqueeze(1)
+            layer_scores.append(layer_attention_logits)
             x = block(x)
 
         return torch.cat(layer_scores, dim=1)  # (batch, layer, head, seq_len, seq_len)
