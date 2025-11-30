@@ -11,7 +11,6 @@ from einops.layers.torch import Rearrange
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class GetCLSToken(nn.Module):
@@ -38,6 +37,9 @@ class SequencePool(nn.Module):
     def forward(self, x):
         weights = self.attention(x)
         return einsum(weights, x, "batch seq, batch seq d_model -> batch d_model")
+
+    def attention_scores(self, x):
+        return self.attention(x)
 
     def reset_parameters(self):
         # Iterate over modules in the sequential block
@@ -169,8 +171,8 @@ class ViTEncoder(nn.Module):
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
-        transformer_bos_tokens=0,
-        transformer_return_bos_tokens=False,
+        transformer_utility_tokens=0,
+        transformer_return_utility_tokens=False,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
         transformer_ff_linear_module_up=None,
@@ -336,8 +338,8 @@ class ViTEncoder(nn.Module):
                 stochastic_depth=transformer_stochastic_depth,
                 causal=False,
                 linear_module=linear_module,
-                bos_tokens=transformer_bos_tokens,
-                return_bos_tokens=transformer_return_bos_tokens,
+                utility_tokens=transformer_utility_tokens,
+                return_utility_tokens=transformer_return_utility_tokens,
                 pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
                 post_norm=transformer_post_norm,
@@ -449,8 +451,8 @@ class ViT(nn.Module):
         transformer_layers=7,
         transformer_heads=4,
         transformer_mlp_ratio=2,
-        transformer_bos_tokens=0,
-        transformer_return_bos_tokens=False,
+        transformer_utility_tokens=0,
+        transformer_return_utility_tokens=False,
         transformer_activation: nn.Module = SquaredReLU,
         transformer_activation_kwargs: Optional[dict] = None,
         transformer_ff_linear_module_up=None,
@@ -516,8 +518,8 @@ class ViT(nn.Module):
             transformer_layers=transformer_layers,
             transformer_heads=transformer_heads,
             transformer_mlp_ratio=transformer_mlp_ratio,
-            transformer_bos_tokens=transformer_bos_tokens,
-            transformer_return_bos_tokens=transformer_return_bos_tokens,
+            transformer_utility_tokens=transformer_utility_tokens,
+            transformer_return_utility_tokens=transformer_return_utility_tokens,
             transformer_activation=transformer_activation,
             transformer_activation_kwargs=transformer_activation_kwargs,
             transformer_ff_linear_module_up=transformer_ff_linear_module_up,
@@ -549,12 +551,23 @@ class ViT(nn.Module):
     def attention_logits(self, x):
         return self.encoder.attention_logits(x)
 
-    def head_to_bos_token_attention_logits(self, x):
+    def pool_attention(self, x):
+        if hasattr(self.pool.summarize, "attention"):
+            return self.pool.summarize.attention(self.encoder(x))
+        else:
+            raise NotImplementedError(
+                "`pool_attention` is currently only implemented where"
+                " head class is SequencePoolClassificationHead"
+            )
+
+    def head_to_utility_token_attention_logits(self, x):
         all_attention = self.attention_logits(x)
         batch_averages = torch.mean(all_attention, dim=0, keepdim=False)
         sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
-        n_bos_tokens = self.encoder.encoder[-1]._bos_tokens
-        return sequence_averages[:, :, :n_bos_tokens]  # (layer, head, bos_token)
+        n_utility_tokens = self.encoder.encoder[-1]._utility_tokens
+        return sequence_averages[
+            :, :, :n_utility_tokens
+        ]  # (layer, head, utility_tokens)
 
     def reset_parameters(self):
         self.encoder.reset_parameters()

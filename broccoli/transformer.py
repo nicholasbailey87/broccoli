@@ -76,7 +76,7 @@ class MHAttention(nn.Module):
         causal=False,
         seq_len=None,
         linear_module: nn.Module = nn.Linear,
-        bos_tokens=0,
+        utility_tokens=0,
         rotary_embedding=None,
         source_size=None,
         scaling="d",
@@ -129,7 +129,7 @@ class MHAttention(nn.Module):
             )
         self.rotary_embedding = rotary_embedding
         self.source_size = source_size
-        self.bos_tokens = bos_tokens
+        self.utility_tokens = utility_tokens
 
         self.reset_parameters()
 
@@ -156,7 +156,7 @@ class MHAttention(nn.Module):
         self, q: torch.Tensor, k: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply Axial RoPE to all tokens except BOS tokens
+        Apply Axial RoPE to all tokens except utility tokens
         """
 
         if len(self.source_size) == 1:
@@ -180,8 +180,8 @@ class MHAttention(nn.Module):
                 "`source_size` must be a tuple of 1, 2 or 3 integers"
             )
 
-        q_bos, q_img = q[:, : self.bos_tokens, :], q[:, self.bos_tokens :, :]
-        k_bos, k_img = k[:, : self.bos_tokens, :], k[:, self.bos_tokens :, :]
+        q_util, q_img = q[:, : self.utility_tokens, :], q[:, self.utility_tokens :, :]
+        k_util, k_img = k[:, : self.utility_tokens, :], k[:, self.utility_tokens :, :]
 
         q_img = rearrange(
             q_img,
@@ -208,9 +208,9 @@ class MHAttention(nn.Module):
             f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
         )
 
-        # Re-combine the BOS tokens and the RoPE-enhanced image tokens
-        q = torch.cat([q_bos, q_img], dim=1)
-        k = torch.cat([k_bos, k_img], dim=1)
+        # Re-combine the utility tokens and the RoPE-enhanced sequence tokens
+        q = torch.cat([q_util, q_img], dim=1)
+        k = torch.cat([k_util, k_img], dim=1)
 
         return q, k
 
@@ -414,7 +414,7 @@ class TransformerBlock(nn.Module):
         n_heads,
         relative_position_embedding=False,
         source_size=None,
-        bos_tokens=0,
+        utility_tokens=0,
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
@@ -472,7 +472,7 @@ class TransformerBlock(nn.Module):
             linear_module=linear_module,
             rotary_embedding=self.rotary_embedding,
             source_size=source_size,
-            bos_tokens=bos_tokens,
+            utility_tokens=utility_tokens,
             scaling=msa_scaling,
         )
 
@@ -571,8 +571,8 @@ class TransformerEncoder(nn.Module):
         stochastic_depth=0.0,
         causal=False,
         linear_module=nn.Linear,
-        bos_tokens=0,
-        return_bos_tokens=False,
+        utility_tokens=0,
+        return_utility_tokens=False,
         pre_norm=True,
         post_norm=False,
         normformer=False,
@@ -596,16 +596,18 @@ class TransformerEncoder(nn.Module):
         super().__init__()
         self.seq_len = seq_len
         self.n_heads = n_heads
-        self._bos_tokens = bos_tokens
-        self.return_bos_tokens = return_bos_tokens
+        self._utility_tokens = utility_tokens
+        self.return_utility_tokens = return_utility_tokens
 
-        # Initialise BOS tokens with normal init, like usual Pytorch embeddings
-        if self._bos_tokens:
-            self._bos_embedding = nn.Parameter(torch.empty(self._bos_tokens, d_model))
-            nn.init.normal_(self._bos_embedding, mean=0.0, std=1.0)
-            self.full_sequence_length = self.seq_len + self._bos_tokens
+        # Initialise utility tokens with normal init, like usual Pytorch embeddings
+        if self._utility_tokens:
+            self._utility_token_embedding = nn.Parameter(
+                torch.empty(self._utility_tokens, d_model)
+            )
+            nn.init.normal_(self._utility_token_embedding, mean=0.0, std=1.0)
+            self.full_sequence_length = self.seq_len + self._utility_tokens
         else:
-            self._bos_embedding = None
+            self._utility_token_embedding = None
             self.full_sequence_length = self.seq_len
 
         self.d_model = d_model
@@ -639,7 +641,7 @@ class TransformerEncoder(nn.Module):
                     n_heads,
                     relative_position_embedding=relative_position_embedding,
                     source_size=source_size,
-                    bos_tokens=bos_tokens,
+                    utility_tokens=utility_tokens,
                     mlp_ratio=mlp_ratio,
                     activation=activation,
                     activation_kwargs=activation_kwargs,
@@ -667,8 +669,10 @@ class TransformerEncoder(nn.Module):
         return ",".join([str(block._kv_distance) for block in self.blocks])
 
     def preprocess(self, x):
-        if self._bos_tokens:
-            x = torch.cat([self._bos_embedding.expand(x.size(0), -1, -1), x], dim=1)
+        if self._utility_tokens:
+            x = torch.cat(
+                [self._utility_token_embedding.expand(x.size(0), -1, -1), x], dim=1
+            )
         else:
             x = x
 
@@ -690,8 +694,8 @@ class TransformerEncoder(nn.Module):
         for block in self.blocks:
             x = block(x)
 
-        if self._bos_tokens and not self.return_bos_tokens:
-            return x[:, self._bos_tokens :, :]
+        if self._utility_tokens and not self.return_utility_tokens:
+            return x[:, self._utility_tokens :, :]
         else:
             return x
 
@@ -710,8 +714,8 @@ class TransformerEncoder(nn.Module):
         return torch.cat(layer_scores, dim=1)  # (batch, layer, head, seq_len, seq_len)
 
     def reset_parameters(self):
-        if self._bos_embedding is not None:
-            nn.init.normal_(self._bos_embedding, mean=0.0, std=1.0)
+        if self._utility_token_embedding is not None:
+            nn.init.normal_(self._utility_token_embedding, mean=0.0, std=1.0)
 
         if self.absolute_position_embedding is not None:
             self.absolute_position_embedding.reset_parameters()
