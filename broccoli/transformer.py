@@ -13,6 +13,7 @@ from .rope import RotaryEmbedding, apply_rotary_emb
 try:
     from flash_attn import flash_attn_func
 
+    print("Using flash-attn.")
     FLASH_ATTN = True
 except ImportError:
     pass
