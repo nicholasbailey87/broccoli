@@ -591,7 +591,13 @@ class TransformerEncoder(nn.Module):
         if relative_position_embedding and (source_size is None):
             raise ValueError(
                 "`source_size` for TransformerEncoder cannot be None if"
-                " `position_embedding_type` is relative"
+                " `relative_position_embedding` is True"
+            )
+
+        if absolute_position_embedding and (seq_len is None):
+            raise ValueError(
+                "`seq_len` for TransformerEncoder cannot be None if"
+                " `absolute_position_embedding` is True"
             )
 
         super().__init__()
@@ -606,9 +612,12 @@ class TransformerEncoder(nn.Module):
                 torch.empty(self._utility_tokens, d_model)
             )
             nn.init.normal_(self._utility_token_embedding, mean=0.0, std=1.0)
-            self.full_sequence_length = self.seq_len + self._utility_tokens
         else:
             self._utility_token_embedding = None
+
+        if self._utility_tokens and (self.seq_len is not None):
+            self.full_sequence_length = self.seq_len + self._utility_tokens
+        else:
             self.full_sequence_length = self.seq_len
 
         self.d_model = d_model
