@@ -161,7 +161,9 @@ class ViTEncoder(nn.Module):
         transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
-        transformer_initial_ff_mlp_dropout=None,
+        transformer_initial_ff_dropout=None,
+        transformer_initial_ff_inner_dropout=None,
+        transformer_initial_ff_outer_dropout=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
         transformer_post_norm=False,
@@ -178,7 +180,9 @@ class ViTEncoder(nn.Module):
         transformer_ff_linear_module_up=None,
         transformer_ff_linear_module_down=None,
         transformer_msa_scaling="d",
-        transformer_mlp_dropout=0.0,
+        transformer_ff_dropout=0.0,
+        transformer_ff_inner_dropout=0.0,
+        transformer_ff_outer_dropout=0.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
@@ -333,7 +337,9 @@ class ViTEncoder(nn.Module):
                 ff_linear_module_up=transformer_ff_linear_module_up,
                 ff_linear_module_down=transformer_ff_linear_module_down,
                 msa_scaling=transformer_msa_scaling,
-                mlp_dropout=transformer_mlp_dropout,
+                ff_dropout=transformer_ff_dropout,
+                ff_inner_dropout=transformer_ff_inner_dropout,
+                ff_outer_dropout=transformer_ff_outer_dropout,
                 msa_dropout=transformer_msa_dropout,
                 stochastic_depth=transformer_stochastic_depth,
                 causal=False,
@@ -357,9 +363,21 @@ class ViTEncoder(nn.Module):
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=(
                     # First truthy assigned value
-                    transformer_initial_ff_mlp_dropout
-                    if transformer_initial_ff_mlp_dropout is not None
-                    else transformer_mlp_dropout
+                    transformer_initial_ff_dropout
+                    if transformer_initial_ff_dropout is not None
+                    else transformer_ff_dropout
+                ),
+                inner_dropout=(
+                    # First truthy assigned value
+                    transformer_initial_ff_inner_dropout
+                    if transformer_initial_ff_inner_dropout is not None
+                    else transformer_ff_inner_dropout
+                ),
+                outer_dropout=(
+                    # First truthy assigned value
+                    transformer_initial_ff_outer_dropout
+                    if transformer_initial_ff_outer_dropout is not None
+                    else transformer_ff_outer_dropout
                 ),
                 linear_module_up=(
                     # First truthy assigned value
@@ -441,7 +459,9 @@ class ViT(nn.Module):
         transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
-        transformer_initial_ff_mlp_dropout=None,
+        transformer_initial_ff_dropout=None,
+        transformer_initial_ff_inner_dropout=None,
+        transformer_initial_ff_outer_dropout=None,
         transformer_pre_norm=True,
         transformer_normformer=False,
         transformer_post_norm=False,
@@ -458,7 +478,9 @@ class ViT(nn.Module):
         transformer_ff_linear_module_up=None,
         transformer_ff_linear_module_down=None,
         transformer_msa_scaling="d",
-        transformer_mlp_dropout=0.0,
+        transformer_ff_dropout=0.0,
+        transformer_ff_inner_dropout=0.0,
+        transformer_ff_outer_dropout=0.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
@@ -508,7 +530,9 @@ class ViT(nn.Module):
             transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
             transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
             transformer_initial_ff_linear_module_down=transformer_initial_ff_linear_module_down,
-            transformer_initial_ff_mlp_dropout=transformer_initial_ff_mlp_dropout,
+            transformer_initial_ff_dropout=transformer_initial_ff_dropout,
+            transformer_initial_ff_inner_dropout=transformer_initial_ff_inner_dropout,
+            transformer_initial_ff_outer_dropout=transformer_initial_ff_outer_dropout,
             transformer_pre_norm=transformer_pre_norm,
             transformer_normformer=transformer_normformer,
             transformer_post_norm=transformer_post_norm,
@@ -525,7 +549,9 @@ class ViT(nn.Module):
             transformer_ff_linear_module_up=transformer_ff_linear_module_up,
             transformer_ff_linear_module_down=transformer_ff_linear_module_down,
             transformer_msa_scaling=transformer_msa_scaling,
-            transformer_mlp_dropout=transformer_mlp_dropout,
+            transformer_ff_dropout=transformer_ff_dropout,
+            transformer_ff_inner_dropout=transformer_ff_inner_dropout,
+            transformer_ff_outer_dropout=transformer_ff_outer_dropout,
             transformer_msa_dropout=transformer_msa_dropout,
             transformer_stochastic_depth=transformer_stochastic_depth,
             transformer_checkpoint_ff=transformer_checkpoint_ff,

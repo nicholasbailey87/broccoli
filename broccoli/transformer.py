@@ -325,6 +325,8 @@ class FeedforwardBlock(nn.Module):
         activation=nn.ReLU,
         activation_kwargs=None,
         dropout=0.0,
+        inner_dropout=None,
+        outer_dropout=None,
         linear_module_up=nn.Linear,
         linear_module_down=nn.Linear,
         pre_norm=True,
@@ -354,7 +356,12 @@ class FeedforwardBlock(nn.Module):
         else:
             self.activation = activation()
 
-        self.dropout = nn.Dropout(dropout)
+        self.inner_dropout = nn.Dropout(
+            inner_dropout if inner_dropout is not None else dropout
+        )
+        self.outer_dropout = nn.Dropout(
+            outer_dropout if outer_dropout is not None else dropout
+        )
 
         self.max_features = (
             2 * ratio * output_features
@@ -367,9 +374,10 @@ class FeedforwardBlock(nn.Module):
                 nn.LayerNorm(input_features) if pre_norm else nn.Identity(),
                 linear_module_up(input_features, self.max_features),
                 self.activation,
+                self.inner_dropout,
                 nn.LayerNorm(ratio * output_features) if normformer else nn.Identity(),
                 linear_module_down(ratio * output_features, output_features),
-                self.dropout,
+                self.outer_dropout,
             ]
         )
 
@@ -422,7 +430,9 @@ class TransformerBlock(nn.Module):
         ff_linear_module_up=None,
         ff_linear_module_down=None,
         msa_scaling="d",
-        mlp_dropout=0.0,
+        ff_dropout=0.0,
+        ff_inner_dropout=0.0,
+        ff_outer_dropout=0.0,
         msa_dropout=0.0,
         identity_probability=0.0,
         causal=False,
@@ -484,7 +494,9 @@ class TransformerBlock(nn.Module):
             d_model,
             activation=activation,
             activation_kwargs=activation_kwargs,
-            dropout=mlp_dropout,
+            dropout=ff_dropout,
+            inner_dropout=ff_inner_dropout,
+            outer_dropout=ff_outer_dropout,
             linear_module_up=(
                 ff_linear_module_up
                 if ff_linear_module_up is not None
@@ -567,7 +579,9 @@ class TransformerEncoder(nn.Module):
         activation_kwargs: Optional[dict] = None,
         ff_linear_module_up=None,
         ff_linear_module_down=None,
-        mlp_dropout=0.0,
+        ff_dropout=0.0,
+        ff_inner_dropout=0.0,
+        ff_outer_dropout=0.0,
         msa_dropout=0.0,
         stochastic_depth=0.0,
         causal=False,
@@ -629,7 +643,7 @@ class TransformerEncoder(nn.Module):
         else:
             self.absolute_position_embedding = None
 
-        self.mlp_dropout = mlp_dropout
+        self.mlp_dropout = ff_dropout
         self.msa_dropout = msa_dropout
         self.stochastic_depth = stochastic_depth
 
@@ -658,7 +672,9 @@ class TransformerEncoder(nn.Module):
                     ff_linear_module_up=ff_linear_module_up,
                     ff_linear_module_down=ff_linear_module_down,
                     msa_scaling=msa_scaling,
-                    mlp_dropout=mlp_dropout,
+                    ff_dropout=ff_dropout,
+                    ff_inner_dropout=ff_inner_dropout,
+                    ff_outer_dropout=ff_outer_dropout,
                     msa_dropout=msa_dropout,
                     identity_probability=self.stochastic_depth_probabilities[i],
                     causal=causal,
