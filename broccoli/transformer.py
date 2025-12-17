@@ -340,6 +340,7 @@ class FeedforwardBlock(nn.Module):
         self.checkpoint = checkpoint
         self.residual_path = residual_path
         self.post_norm = post_norm
+        self.xglu = activation.__name__.endswith("GLU")
 
         if self.residual_path and (output_features < input_features):
             raise ValueError(
@@ -364,26 +365,62 @@ class FeedforwardBlock(nn.Module):
         )
 
         self.max_features = (
-            2 * ratio * output_features
-            if activation.__name__.endswith("GLU")
-            else ratio * output_features
+            2 * ratio * output_features if self.xglu else ratio * output_features
         )
+
+        self.linear_in = linear_module_up(input_features, self.max_features)
+        self.linear_out = linear_module_down(ratio * output_features, output_features)
 
         self.process = nn.Sequential(
             *[
                 nn.LayerNorm(input_features) if pre_norm else nn.Identity(),
-                linear_module_up(input_features, self.max_features),
+                self.linear_in,
                 self.activation,
                 self.inner_dropout,
                 nn.LayerNorm(ratio * output_features) if normformer else nn.Identity(),
-                linear_module_down(ratio * output_features, output_features),
+                self.linear_out,
                 self.outer_dropout,
             ]
         )
 
+        self.recycling_enabled = False
+        if hasattr(self.linear_in, "row_recycling_rate") and hasattr(
+            self.linear_out, "column_recycling_rate"
+        ):
+            self.recycling_enabled = True
+            self.master_recycling_rate = self.linear_in.row_recycling_rate
+            self.linear_in.row_recycling_rate = 0.0
+            self.linear_out.column_recycling_rate = 0.0
+            if hasattr(self.linear_in, "column_recycling_rate") or hasattr(
+                self.linear_out, "row_recycling_rate"
+            ):
+                raise NotImplementedError(
+                    "At the moment this layer can only support recycling linear "
+                    "layers if the in layer resets only rows and the out layer "
+                    "resets only columns."
+                )
+
         self.reset_parameters()
 
     def forward(self, x):
+
+        # Recycle weights if using recycling linear layers
+        if self.training and self.recycling_enabled:
+            multiplier = self.linear_in._get_multiplier()
+            rate = self.master_recycling_rate * multiplier
+            if rate > 0:
+                probs = torch.rand(self.linear_out.in_features, device=x.device)
+                mask = probs < rate
+                if mask.any():
+                    indices = torch.nonzero(mask).squeeze(-1)
+                    self.linear_out.reset_columns(indices, self.linear_out.optimisers)
+                    if self.xglu:
+                        indices_in = torch.cat(
+                            [indices, indices + self.linear_out.in_features]
+                        )
+                        self.linear_in.reset_rows(indices_in, self.linear_in.optimisers)
+                    else:
+                        self.linear_in.reset_rows(indices, self.linear_in.optimisers)
 
         if self.checkpoint:
             processed = checkpoint(self.process, x, use_reentrant=False)
