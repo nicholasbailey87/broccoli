@@ -153,6 +153,9 @@ class RecyclingLinear(nn.Module):
         adaptive=False,
     ):
         super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bias = bias
         self.linear = nn.Linear(in_features, out_features, bias=bias)
         self.row_recycling_rate = row_recycling_rate
         self.column_recycling_rate = column_recycling_rate
