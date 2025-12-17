@@ -1,5 +1,6 @@
 import math
 import random
+import warnings
 from typing import Union, List, Iterable
 
 import torch
@@ -149,33 +150,72 @@ class RecyclingLinear(nn.Module):
         bias: bool = True,
         row_recycling_rate: float = 0.0,
         column_recycling_rate: float = 0.0,
+        adaptive=False,
     ):
         super().__init__()
         self.linear = nn.Linear(in_features, out_features, bias=bias)
         self.row_recycling_rate = row_recycling_rate
         self.column_recycling_rate = column_recycling_rate
+        self.adaptive = adaptive
         self.optimisers = []
+        self.initial_learning_rates = []
+        self._warned_about_registration = False
 
     def register_optimiser(self, optimiser: torch.optim.Optimizer):
         self.optimisers.append(optimiser)
+        self.initial_learning_rates.append(self._get_learning_rate(optimiser))
+        if self.initial_learning_rates[-1] == 0.0:
+            warnings.warn(
+                "Learning rate of registered optimiser was 0.0 - make sure "
+                "you haven't initialised a scheduler before registering the "
+                "optimiser",
+                stacklevel=2,
+            )
+
+    def _get_learning_rate(self, optimiser: torch.optim.Optimizer):
+        for group in optimiser.param_groups:
+            for param in group["params"]:
+                if param is self.linear.weight:
+                    return group["lr"]
+
+    def _get_multiplier(self):
+        if not self.adaptive or not self.optimisers:
+            return 1.0
+        else:
+            init = self.initial_learning_rates
+            current = [self._get_learning_rate(o) for o in self.optimisers]
+            pairs = zip(current, init, strict=True)
+            multipliers = [a / b for a, b in pairs if b != 0.0]
+            return min(multipliers) if multipliers else 0.0
 
     def forward(self, x):
+        multiplier = self._get_multiplier()
+        col_recycling_rate = self.column_recycling_rate * multiplier
+        row_recycling_rate = self.row_recycling_rate * multiplier
+
         if self.training and self.optimisers:
 
-            if self.row_recycling_rate > 0:
+            if row_recycling_rate > 0:
                 probs = torch.rand(self.linear.out_features, device=x.device)
-                mask = probs < self.row_recycling_rate
+                mask = probs < row_recycling_rate
                 if mask.any():
                     # nonzero returns [N, 1], squeeze to get [N]
                     indices = torch.nonzero(mask).squeeze(-1)
                     self.reset_rows(indices, self.optimisers)
 
-            if self.column_recycling_rate > 0:
+            if col_recycling_rate > 0:
                 probs = torch.rand(self.linear.in_features, device=x.device)
-                mask = probs < self.column_recycling_rate
+                mask = probs < col_recycling_rate
                 if mask.any():
                     indices = torch.nonzero(mask).squeeze(-1)
                     self.reset_columns(indices, self.optimisers)
+
+        elif self.training and not self._warned_about_registration:
+            warnings.warn(
+                "RecyclingLinear: No optimiser registered. Recycling disabled.",
+                stacklevel=2,
+            )
+            self._warned_about_registration = True
 
         return self.linear(x)
 
