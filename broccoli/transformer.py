@@ -391,8 +391,12 @@ class FeedforwardBlock(nn.Module):
             self.master_recycling_rate = self.linear_in.row_recycling_rate
             self.linear_in.row_recycling_rate = 0.0
             self.linear_out.column_recycling_rate = 0.0
-            if hasattr(self.linear_in, "column_recycling_rate") or hasattr(
-                self.linear_out, "row_recycling_rate"
+            if (
+                hasattr(self.linear_in, "column_recycling_rate")
+                and self.linear_in.column_recycling_rate > 0
+            ) or (
+                hasattr(self.linear_out, "row_recycling_rate")
+                and self.linear_out.row_recycling_rate > 0
             ):
                 raise NotImplementedError(
                     "At the moment this layer can only support recycling linear "
