@@ -205,13 +205,14 @@ class RecyclingLinear(nn.Module):
             random_weights = self._random_weights(
                 indices.size(0), self.linear.weight.size(1)
             )
-            self._update_weights(indices, 0, random_weights, self.optimisers)  # dim
             if self.xglu:
-                indices = indices + (self.linear.out_features // 2)
-                centred_weights = self._mean_gate_weights()
-                centred_weights = centred_weights.expand(indices.size(0), -1)
+                gate_indices = indices
+                value_indices = indices + (self.linear.out_features // 2)
+                self._update_weights(value_indices, 0, random_weights, self.optimisers)
+                centred_gate_weights = self._mean_gate_weights()
+                centred_gate_weights = centred_gate_weights.expand(indices.size(0), -1)
                 self._update_weights(
-                    indices, 0, centred_weights, self.optimisers  # dim
+                    gate_indices, 0, centred_gate_weights, self.optimisers  # dim
                 )
         else:
             return
