@@ -226,10 +226,11 @@ class RecyclingLinear(nn.Module):
             idx_tensor = indices
 
         if idx_tensor.size(0):
-            random_weights = self._random_weights(
-                self.linear.weight.size(0), indices.size(0)
+            zeros = torch.zeros(
+                (self.linear.weight.size(0), indices.size(0)),
+                device=self.linear.weight.device,
             )
-            self._update_weights(indices, 1, random_weights, self.optimisers)  # dim
+            self._update_weights(indices, 1, zeros, self.optimisers)  # dim
         else:
             return
 
