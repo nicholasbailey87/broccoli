@@ -410,21 +410,9 @@ class FeedforwardBlock(nn.Module):
 
         # Recycle weights if using recycling linear layers
         if self.training and self.recycling_enabled:
-            multiplier = self.linear_in._get_multiplier()
-            rate = self.master_recycling_rate * multiplier
-            if rate > 0:
-                probs = torch.rand(self.linear_out.in_features, device=x.device)
-                mask = probs < rate
-                if mask.any():
-                    indices = torch.nonzero(mask).squeeze(-1)
-                    self.linear_out.reset_columns(indices, self.linear_out.optimisers)
-                    if self.xglu:
-                        indices_in = torch.cat(
-                            [indices, indices + self.linear_out.in_features]
-                        )
-                        self.linear_in.reset_rows(indices_in, self.linear_in.optimisers)
-                    else:
-                        self.linear_in.reset_rows(indices, self.linear_in.optimisers)
+            indices = self.linear_out.get_reset_indices(1)
+            self.linear_in.reset_rows(indices)
+            self.linear_out.reset_columns(indices)
 
         if self.checkpoint:
             processed = checkpoint(self.process, x, use_reentrant=False)

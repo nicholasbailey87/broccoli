@@ -151,11 +151,13 @@ class RecyclingLinear(nn.Module):
         row_recycling_rate: float = 0.0,
         column_recycling_rate: float = 0.0,
         adaptive=False,
+        xglu=False,
     ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.bias = bias
+        self.xglu = xglu
         self.linear = nn.Linear(in_features, out_features, bias=bias)
         self.row_recycling_rate = row_recycling_rate
         self.column_recycling_rate = column_recycling_rate
@@ -191,28 +193,49 @@ class RecyclingLinear(nn.Module):
             multipliers = [a / b for a, b in pairs if b != 0.0]
             return min(multipliers) if multipliers else 0.0
 
+    def reset_rows(self, indices):
+        if not torch.is_tensor(indices):
+            idx_tensor = torch.as_tensor(
+                list(indices), dtype=torch.long, device=self.linear.weight.device
+            )
+        else:
+            idx_tensor = indices
+
+        if idx_tensor.size(0):
+            random_weights = self._random_weights(
+                indices.size(0), self.linear.weight.size(1)
+            )
+            self._update_weights(indices, 0, random_weights, self.optimisers)  # dim
+            if self.xglu:
+                indices = indices + (self.linear.out_features // 2)
+                centred_weights = self._mean_gate_weights()
+                centred_weights = centred_weights.expand(indices.size(0), -1)
+                self._update_weights(
+                    indices, 0, centred_weights, self.optimisers  # dim
+                )
+        else:
+            return
+
+    def reset_columns(self, indices):
+        if not torch.is_tensor(indices):
+            idx_tensor = torch.as_tensor(
+                list(indices), dtype=torch.long, device=self.linear.weight.device
+            )
+        else:
+            idx_tensor = indices
+
+        if idx_tensor.size(0):
+            random_weights = self._random_weights(
+                self.linear.weight.size(0), indices.size(0)
+            )
+            self._update_weights(indices, 1, random_weights, self.optimisers)  # dim
+        else:
+            return
+
     def forward(self, x):
-        multiplier = self._get_multiplier()
-        col_recycling_rate = self.column_recycling_rate * multiplier
-        row_recycling_rate = self.row_recycling_rate * multiplier
-
         if self.training and self.optimisers:
-
-            if row_recycling_rate > 0:
-                probs = torch.rand(self.linear.out_features, device=x.device)
-                mask = probs < row_recycling_rate
-                if mask.any():
-                    # nonzero returns [N, 1], squeeze to get [N]
-                    indices = torch.nonzero(mask).squeeze(-1)
-                    self.reset_rows(indices, self.optimisers)
-
-            if col_recycling_rate > 0:
-                probs = torch.rand(self.linear.in_features, device=x.device)
-                mask = probs < col_recycling_rate
-                if mask.any():
-                    indices = torch.nonzero(mask).squeeze(-1)
-                    self.reset_columns(indices, self.optimisers)
-
+            self.reset_rows(self.get_reset_indices(0))
+            self.reset_columns(self.get_reset_indices(1))
         elif self.training and not self._warned_about_registration:
             warnings.warn(
                 "RecyclingLinear: No optimiser registered. Recycling disabled.",
@@ -222,82 +245,77 @@ class RecyclingLinear(nn.Module):
 
         return self.linear(x)
 
-    def reset_rows(
+    def get_reset_indices(self, dim):
+        base_rate = self.row_recycling_rate if dim == 0 else self.column_recycling_rate
+        p = base_rate * self._get_multiplier()
+        if dim == 0:
+            if self.xglu:
+                sample_space = self.linear.out_features // 2
+            else:
+                sample_space = self.linear.out_features
+        elif dim == 1:
+            sample_space = self.linear.in_features
+        else:
+            raise ValueError("`dim` must be 0 or 1")
+
+        # Sample the indices
+        probs = torch.rand(sample_space, device=self.linear.weight.device)
+        mask = probs < p
+        if mask.any():
+            return torch.nonzero(mask).squeeze(-1)
+        else:
+            return torch.tensor([], dtype=torch.long, device=self.linear.weight.device)
+
+    def _random_weights(self, rows, columns):
+        device = self.linear.weight.device
+        weights = self.linear.weight.data
+        stdv = 1.0 / math.sqrt(weights.size(1))
+        random_weights = torch.rand(rows, columns, device=device)
+        random_weights -= 0.5  # Range [-0.5, +0.5]
+        random_weights *= 2.0 * stdv  # Range [-stdv, +stdv]
+        return random_weights
+
+    def _mean_gate_weights(self):
+        """
+        Only used when self.xglu
+        """
+        weights = self.linear.weight.data
+        rows = weights.size(0)
+        return self.linear.weight[: int(rows / 2)].data.mean(dim=0, keepdim=True)
+
+    def _update_weights(
         self,
         indices: Iterable[int],
+        dim: int,
+        data: torch.Tensor,
         optimisers: Union[
             List[torch.optim.Optimizer], torch.optim.Optimizer, None
         ] = None,
     ):
-        """
-        Update some of the weight rows to be equal to the mean of all weight rows.
-        """
         if optimisers is None:
             optimisers = []
         if not isinstance(optimisers, list):
             optimisers = [optimisers]
 
-        device = self.linear.weight.device
-        idx_tensor = torch.as_tensor(list(indices), dtype=torch.long, device=device)
-
-        if idx_tensor.numel() == 0:
-            return
-
-        with torch.no_grad():
-            # Calculate mean of all rows including the rows to be reset
-            mean_vector = self.linear.weight.data.mean(
-                dim=0, keepdim=True
-            )  # [1, in_features]
-            update_data = mean_vector.expand(idx_tensor.size(0), -1)
-            self.linear.weight.data[idx_tensor] = update_data
-
-            if self.linear.bias is not None:
-                self.linear.bias.data[idx_tensor] = 0.0
-
-            self._reset_optim_state(self.linear.weight, idx_tensor, optimisers, dim=0)
-            if self.linear.bias is not None:
-                self._reset_optim_state(self.linear.bias, idx_tensor, optimisers, dim=0)
-
-    def reset_columns(
-        self,
-        indices: Iterable[int],
-        optimisers: Union[
-            List[torch.optim.Optimizer], torch.optim.Optimizer, None
-        ] = None,
-    ):
-        """
-        Update some of the weight columns to be random as though reinitialised.
-        """
-        if optimisers is None:
-            optimisers = []
-        if not isinstance(optimisers, list):
-            optimisers = [optimisers]
-
-        device = self.linear.weight.device
-        idx_tensor = torch.as_tensor(list(indices), dtype=torch.long, device=device)
-
-        if idx_tensor.numel() == 0:
-            return
-
-        with torch.no_grad():
-            # 1. Generate Random Columns
-            # Shape: [out_features, N_indices]
-            weights = self.linear.weight.data
-            stdv = 1.0 / math.sqrt(weights.size(1))
-
-            # Generate [Rows, N] block
-            random_weights = torch.rand(
-                weights.size(0), idx_tensor.size(0), device=device
+        if not torch.is_tensor(indices):
+            idx_tensor = torch.as_tensor(
+                list(indices), dtype=torch.long, device=self.linear.weight.device
             )
-            random_weights = (random_weights - 0.5) * 2.0 * stdv
+        else:
+            idx_tensor = indices
 
-            # 2. Update Weights (One-shot)
-            # We assign into the columns specified by idx_tensor
-            self.linear.weight.data[:, idx_tensor] = random_weights
+        if idx_tensor.numel() == 0:
+            return
 
-            # 3. Update Optimizers
-            # Bias is untouched by column resets (bias is shape [Out], cols are [In])
-            self._reset_optim_state(self.linear.weight, idx_tensor, optimisers, dim=1)
+        with torch.no_grad():
+            if dim == 0:
+                self.linear.weight.data[idx_tensor] = data
+            elif dim == 1:
+                self.linear.weight.data[:, idx_tensor] = data
+            else:
+                raise ValueError("`dim` must be 0 or 1")
+
+            self._reset_optim_state(self.linear.weight, idx_tensor, optimisers, dim=dim)
 
     def _reset_optim_state(self, param, idx_tensor, optimisers, dim):
         """
