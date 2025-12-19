@@ -202,18 +202,18 @@ class RecyclingLinear(nn.Module):
             idx_tensor = indices
 
         if idx_tensor.size(0):
-            random_weights = self._random_weights(
-                indices.size(0), self.linear.weight.size(1)
-            )
+            centred_value_weights = self._mean_value_weights()
             if self.xglu:
                 gate_indices = indices
                 value_indices = indices + (self.linear.out_features // 2)
-                self._update_weights(value_indices, 0, random_weights, self.optimisers)
                 centred_gate_weights = self._mean_gate_weights()
                 centred_gate_weights = centred_gate_weights.expand(indices.size(0), -1)
                 self._update_weights(
                     gate_indices, 0, centred_gate_weights, self.optimisers  # dim
                 )
+            self._update_weights(
+                value_indices, 0, centred_value_weights, self.optimisers
+            )
         else:
             return
 
@@ -276,6 +276,14 @@ class RecyclingLinear(nn.Module):
         random_weights -= 0.5  # Range [-0.5, +0.5]
         random_weights *= 2.0 * stdv  # Range [-stdv, +stdv]
         return random_weights
+
+    def _mean_value_weights(self):
+        """
+        Only used when self.xglu
+        """
+        weights = self.linear.weight.data
+        rows = weights.size(0)
+        return self.linear.weight[int(rows / 2) :].data.mean(dim=0, keepdim=True)
 
     def _mean_gate_weights(self):
         """

@@ -46,10 +46,7 @@ class GELU(nn.Module):
 
 class Swish(nn.Module):
     """
-    Implementation of (beta) SwiGLU, as introduced in "GLU Variants Improve Transformer"
-        (https://arxiv.org/abs/2002.05202v1) and used to great effect in LLaMa 2.0.
-
-    Halves the incoming parameter count, which should be scaled up before input.
+    Implementation of (beta) Swish
     """
 
     def __init__(self) -> None:
