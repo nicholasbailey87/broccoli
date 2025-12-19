@@ -202,6 +202,7 @@ class RecyclingLinear(nn.Module):
             idx_tensor = indices
 
         if idx_tensor.size(0):
+            value_indices = indices
             centred_value_weights = self._mean_value_weights()
             centred_value_weights = centred_value_weights.expand(indices.size(0), -1)
             if self.xglu:
