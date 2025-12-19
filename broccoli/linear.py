@@ -231,9 +231,9 @@ class RecyclingLinear(nn.Module):
             random_weights = self._random_weights(
                 self.linear.weight.size(0), indices.size(0)
             )
-            random_weights *= (
-                0.01  # Make them quiet so they don't introduce loud noise!
-            )
+            # Make random col weights quiet so they don't introduce loud noise...
+            # ...but not so quiet that FP16 zeros them and ruins symmetry breaking!
+            random_weights *= 0.1
             self._update_weights(indices, 1, random_weights, self.optimisers)  # dim
         else:
             return
