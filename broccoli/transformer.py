@@ -411,7 +411,7 @@ class FeedforwardBlock(nn.Module):
         # Recycle weights if using recycling linear layers
         if self.training and self.recycling_enabled:
             indices = self.linear_out.get_reset_indices(1)
-            self.linear_in.reset_rows(indices)
+            self.linear_in.reset_rows(indices, incoming_data=x)
             self.linear_out.reset_columns(indices)
 
         if self.checkpoint:

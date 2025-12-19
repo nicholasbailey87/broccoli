@@ -193,7 +193,12 @@ class RecyclingLinear(nn.Module):
             multipliers = [a / b for a, b in pairs if b != 0.0]
             return min(multipliers) if multipliers else 0.0
 
-    def reset_rows(self, indices):
+    def reset_rows(self, indices, incoming_data=None):
+        """
+        Resets rows.
+        If incoming_data is provided, resets to the centroid (mean) of that data.
+        If not, resets to the mean of existing weights.
+        """
         if not torch.is_tensor(indices):
             idx_tensor = torch.as_tensor(
                 list(indices), dtype=torch.long, device=self.linear.weight.device
@@ -201,23 +206,23 @@ class RecyclingLinear(nn.Module):
         else:
             idx_tensor = indices
 
-        if idx_tensor.size(0):
-            value_indices = indices
-            centred_value_weights = self._mean_value_weights()
-            centred_value_weights = centred_value_weights.expand(indices.size(0), -1)
-            if self.xglu:
-                gate_indices = indices
-                value_indices = indices + (self.linear.out_features // 2)
-                centred_gate_weights = self._mean_gate_weights()
-                centred_gate_weights = centred_gate_weights.expand(indices.size(0), -1)
-                self._update_weights(
-                    gate_indices, 0, centred_gate_weights, self.optimisers  # dim
-                )
-            self._update_weights(
-                value_indices, 0, centred_value_weights, self.optimisers
-            )
-        else:
+        if idx_tensor.numel() == 0:
             return
+
+        if incoming_data is not None:
+            target_center = self._mean_input_weights(incoming_data)
+        else:
+            target_center = self._mean_value_weights()
+
+        target_center = target_center.expand(idx_tensor.size(0), -1)
+
+        if self.xglu:
+            gate_indices = idx_tensor
+            value_indices = idx_tensor + (self.linear.out_features // 2)
+            self._update_weights(gate_indices, 0, target_center, self.optimisers)
+            self._update_weights(value_indices, 0, target_center, self.optimisers)
+        else:
+            self._update_weights(idx_tensor, 0, target_center, self.optimisers)
 
     def reset_columns(self, indices):
         if not torch.is_tensor(indices):
@@ -280,6 +285,17 @@ class RecyclingLinear(nn.Module):
         random_weights -= 0.5  # Range [-0.5, +0.5]
         random_weights *= 2.0 * stdv  # Range [-stdv, +stdv]
         return random_weights
+
+    def _mean_input_weights(self, input):
+        reduce_dims = list(range(input.ndim - 1))
+        data_mean = input.detach().mean(dim=reduce_dims, keepdim=True)
+
+        weights = self.linear.weight.data
+        stdv = 1.0 / math.sqrt(weights.size(1))
+        data_norm = data_mean.std() + 1e-6
+        scale_factor = stdv / data_norm
+
+        return data_mean * scale_factor
 
     def _mean_value_weights(self):
         """
