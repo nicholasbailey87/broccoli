@@ -228,11 +228,13 @@ class RecyclingLinear(nn.Module):
             idx_tensor = indices
 
         if idx_tensor.size(0):
-            zeros = torch.zeros(
-                (self.linear.weight.size(0), indices.size(0)),
-                device=self.linear.weight.device,
+            random_weights = self._random_weights(
+                self.linear.weight.size(0), indices.size(0)
             )
-            self._update_weights(indices, 1, zeros, self.optimisers)  # dim
+            random_weights *= (
+                0.01  # Make them quiet so they don't introduce loud noise!
+            )
+            self._update_weights(indices, 1, random_weights, self.optimisers)  # dim
         else:
             return
 
@@ -285,7 +287,10 @@ class RecyclingLinear(nn.Module):
         """
         weights = self.linear.weight.data
         rows = weights.size(0)
-        return self.linear.weight[int(rows / 2) :].data.mean(dim=0, keepdim=True)
+        if self.xglu:
+            return self.linear.weight[int(rows / 2) :].data.mean(dim=0, keepdim=True)
+        else:
+            return self.linear.weight.data.mean(dim=0, keepdim=True)
 
     def _mean_gate_weights(self):
         """
