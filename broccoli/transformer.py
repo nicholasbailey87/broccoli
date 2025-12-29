@@ -1,3 +1,4 @@
+import warnings
 import math
 from typing import Optional, Tuple
 
@@ -78,6 +79,7 @@ class MHAttention(nn.Module):
         seq_len=None,
         linear_module: nn.Module = nn.Linear,
         utility_tokens=0,
+        talking_heads=False,
         rotary_embedding=None,
         source_size=None,
         scaling="d",
@@ -95,6 +97,15 @@ class MHAttention(nn.Module):
             assert source_size is not None
         if causal:
             assert seq_len is not None
+
+        self.talking_heads = talking_heads
+
+        if self.talking_heads:
+            self.head_projection = nn.Linear(n_heads, n_heads, bias=False)
+            self.sample_projection = nn.Linear(n_heads, n_heads, bias=False)
+        else:
+            self.head_projection = None
+            self.sample_projection = None
 
         self.embed_dim = embed_dim
         self.n_heads = n_heads
@@ -243,7 +254,7 @@ class MHAttention(nn.Module):
 
         q, k, v = self.project_qkv(q, k, v)
 
-        if FLASH_ATTN:
+        if FLASH_ATTN and not self.talking_heads:
             # Divide Q/K/V into heads
             q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
             k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
@@ -271,11 +282,21 @@ class MHAttention(nn.Module):
 
             qk_scores *= self.scaling_factor
 
+            if self.talking_heads:
+                qk_scores = torch.einsum(
+                    "b h i j, o h -> b o i j", qk_scores, self.head_projection.weight
+                )
+
             # Apply mask if causal (must come before softmax)
             if self.causal:
                 qk_scores.masked_fill_(self.mask, float("-inf"))
 
             qk_scores = F.softmax(qk_scores, dim=-1)
+
+            if self.talking_heads:
+                qk_scores = torch.einsum(
+                    "b h i j, o h -> b o i j", qk_scores, self.sample_projection.weight
+                )
 
             qk_scores = self.dropout(qk_scores)
 
@@ -310,6 +331,10 @@ class MHAttention(nn.Module):
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
         self.out_proj.reset_parameters()
+        if self.talking_heads:
+            # Initialize close to identity
+            nn.init.eye_(self.head_projection.weight)
+            nn.init.eye_(self.sample_projection.weight)
 
 
 class FeedforwardBlock(nn.Module):
@@ -453,6 +478,7 @@ class TransformerBlock(nn.Module):
         relative_position_embedding=False,
         source_size=None,
         utility_tokens=0,
+        talking_heads=False,
         mlp_ratio=4,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
@@ -513,6 +539,7 @@ class TransformerBlock(nn.Module):
             rotary_embedding=self.rotary_embedding,
             source_size=source_size,
             utility_tokens=utility_tokens,
+            talking_heads=talking_heads,
             scaling=msa_scaling,
         )
 
@@ -616,6 +643,7 @@ class TransformerEncoder(nn.Module):
         causal=False,
         linear_module=nn.Linear,
         utility_tokens=0,
+        talking_heads=False,
         return_utility_tokens=False,
         pre_norm=True,
         post_norm=False,
@@ -644,6 +672,13 @@ class TransformerEncoder(nn.Module):
             )
 
         super().__init__()
+
+        if FLASH_ATTN and talking_heads:
+            warnings.warn(
+                "Using talking heads currently prevents using flash attention.",
+                stacklevel=2,
+            )
+
         self.seq_len = seq_len
         self.n_heads = n_heads
         self._utility_tokens = utility_tokens
@@ -695,6 +730,7 @@ class TransformerEncoder(nn.Module):
                     relative_position_embedding=relative_position_embedding,
                     source_size=source_size,
                     utility_tokens=utility_tokens,
+                    talking_heads=talking_heads,
                     mlp_ratio=mlp_ratio,
                     activation=activation,
                     activation_kwargs=activation_kwargs,
