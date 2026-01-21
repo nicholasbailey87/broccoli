@@ -710,6 +710,11 @@ class TransformerEncoder(nn.Module):
         self._utility_tokens = utility_tokens
         self.return_utility_tokens = return_utility_tokens
 
+        if layerscale:
+            self.layerscale = LayerScale(d_model)
+        else:
+            self.layerscale = None
+
         # Initialise utility tokens with normal init, like usual Pytorch embeddings
         if self._utility_tokens:
             self._utility_token_embedding = nn.Parameter(
@@ -795,15 +800,17 @@ class TransformerEncoder(nn.Module):
             x = x
 
         if self.absolute_position_embedding is not None:
-            x = x + self.absolute_position_embedding(
+            position_embedding = self.absolute_position_embedding(
                 torch.arange(
                     0, self.full_sequence_length, dtype=torch.long, device=x.device
                 ).unsqueeze(
                     0
                 )  # to shape (1, seq_len) to broadcast over batch
             )
+            if self.layerscale is not None:
+                position_embedding = self.layerscale(position_embedding)
 
-        return x
+        return x + position_embedding
 
     def forward(self, x):
 
