@@ -24,10 +24,10 @@ except ImportError:
 class LayerScale(nn.Module):
     def __init__(self, dim, init_values=1e-4):
         super().__init__()
-        self.scale = nn.Parameter(init_values * torch.ones(dim))
+        self.nondecay_scale = nn.Parameter(init_values * torch.ones(dim))
 
     def forward(self, x):
-        return x * self.gamma
+        return x * self.nondecay_scale
 
 
 def drop_path(
