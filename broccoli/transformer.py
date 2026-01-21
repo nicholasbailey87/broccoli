@@ -21,6 +21,15 @@ except ImportError:
     FLASH_ATTN = False
 
 
+class LayerScale(nn.Module):
+    def __init__(self, dim, init_values=1e-4):
+        super().__init__()
+        self.scale = nn.Parameter(init_values * torch.ones(dim))
+
+    def forward(self, x):
+        return x * self.gamma
+
+
 def drop_path(
     x, drop_prob: float = 0.0, training: bool = False, scale_by_keep: bool = True
 ):
@@ -390,11 +399,15 @@ class FeedforwardBlock(nn.Module):
         )
 
         self.max_features = (
-            2 * ratio * output_features if self.xglu else ratio * output_features
+            2 * int(ratio * output_features)
+            if self.xglu
+            else int(ratio * output_features)
         )
 
         self.linear_in = linear_module_up(input_features, self.max_features)
-        self.linear_out = linear_module_down(ratio * output_features, output_features)
+        self.linear_out = linear_module_down(
+            int(ratio * output_features), output_features
+        )
 
         self.process = nn.Sequential(
             *[
@@ -402,7 +415,11 @@ class FeedforwardBlock(nn.Module):
                 self.linear_in,
                 self.activation,
                 self.inner_dropout,
-                nn.LayerNorm(ratio * output_features) if normformer else nn.Identity(),
+                (
+                    nn.LayerNorm(int(ratio * output_features))
+                    if normformer
+                    else nn.Identity()
+                ),
                 self.linear_out,
                 self.outer_dropout,
             ]
@@ -496,6 +513,7 @@ class TransformerBlock(nn.Module):
         post_norm=False,
         normformer=False,
         checkpoint_ff=True,
+        layerscale=True,
     ):
         """
         Args:
@@ -516,6 +534,13 @@ class TransformerBlock(nn.Module):
         self.layer_norm_1 = nn.LayerNorm(d_model)
         self.layer_norm_2 = nn.LayerNorm(d_model)
         self.layer_norm_3 = nn.LayerNorm(d_model)
+
+        if layerscale:
+            self.layerscale1 = LayerScale(d_model)
+            self.layerscale2 = LayerScale(d_model)
+        else:
+            self.layerscale1 = nn.Identity()
+            self.layerscale2 = nn.Identity()
 
         if relative_position_embedding:
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
@@ -580,19 +605,19 @@ class TransformerBlock(nn.Module):
 
         if self.pre_norm:
             x = self.layer_norm_1(x)
-            x = x + self.drop_path(self.attn(x, x, x))
+            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
             x = self.layer_norm_2(x)
-            x = x + self.drop_path(self.ff(x))
+            x = x + self.drop_path(self.layerscale2(self.ff(x)))
             if self.post_norm:  # i.e. in addition! Pre and post.
                 x = self.layer_norm_3(x)
         elif self.post_norm:  # i.e. only, not prenorm, just post
-            x = x + self.drop_path(self.attn(x, x, x))
+            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
             x = self.layer_norm_1(x)
-            x = x + self.drop_path(self.ff(x))
+            x = x + self.drop_path(self.layerscale2(self.ff(x)))
             x = self.layer_norm_2(x)
         else:  # Not pre or post norm. Stand well back.
-            x = x + self.drop_path(self.attn(x, x, x))
-            x = x + self.drop_path(self.ff(x))
+            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
+            x = x + self.drop_path(self.layerscale2(self.ff(x)))
 
         return x
 
@@ -650,6 +675,7 @@ class TransformerEncoder(nn.Module):
         normformer=False,
         msa_scaling="d",
         checkpoint_ff=True,
+        layerscale=True,
     ):
         """
         Args:
@@ -748,6 +774,7 @@ class TransformerEncoder(nn.Module):
                     post_norm=post_norm,
                     normformer=normformer,
                     checkpoint_ff=checkpoint_ff,
+                    layerscale=layerscale,
                 )
                 for i in range(n_layers)
             ]
