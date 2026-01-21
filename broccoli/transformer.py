@@ -809,8 +809,9 @@ class TransformerEncoder(nn.Module):
             )
             if self.layerscale is not None:
                 position_embedding = self.layerscale(position_embedding)
+            x += position_embedding
 
-        return x + position_embedding
+        return x
 
     def forward(self, x):
 
