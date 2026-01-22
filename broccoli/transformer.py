@@ -24,19 +24,24 @@ except ImportError:
 class LayerScale(nn.Module):
     def __init__(self, dim, decay=False, init_values=1e-4):
         super().__init__()
+        self.dim = dim
         self.decay = decay
-        if decay:
-            self.scale = nn.Parameter(init_values * torch.ones(dim))
-            self.nondecay_scale = None
-        else:
-            self.nondecay_scale = nn.Parameter(init_values * torch.ones(dim))
-            self.scale = None
+        self.init_values = init_values
+        self.reset_parameters()
 
     def forward(self, x):
         if self.decay:
             return x * self.scale
         else:
             return x * self.nondecay_scale
+
+    def reset_parameters(self):
+        if self.decay:
+            self.scale = nn.Parameter(self.init_values * torch.ones(self.dim))
+            self.nondecay_scale = None
+        else:
+            self.nondecay_scale = nn.Parameter(self.init_values * torch.ones(self.dim))
+            self.scale = None
 
 
 def drop_path(
@@ -540,10 +545,18 @@ class TransformerBlock(nn.Module):
 
         self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
-        self.layer_norm_1 = nn.LayerNorm(d_model)
-        self.layer_norm_2 = nn.LayerNorm(d_model)
-        self.layer_norm_3 = nn.LayerNorm(d_model)
+        if self.pre_norm:
+            self.pre_attention_norm = nn.LayerNorm(d_model)
+            self.pre_mlp_norm = nn.LayerNorm(d_model)
 
+        if normformer:
+            self.normformer_norm = nn.LayerNorm(d_model)
+
+        if self.post_norm:
+            self.post_attention_norm = nn.LayerNorm(d_model)
+            self.post_mlp_norm = nn.LayerNorm(d_model)
+
+        self.layerscale = layerscale
         if layerscale:
             self.layerscale1 = LayerScale(d_model)
             self.layerscale2 = LayerScale(d_model)
@@ -613,20 +626,31 @@ class TransformerBlock(nn.Module):
     def forward(self, x):
 
         if self.pre_norm:
-            x = self.layer_norm_1(x)
-            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
-            x = self.layer_norm_2(x)
-            x = x + self.drop_path(self.layerscale2(self.ff(x)))
-            if self.post_norm:  # i.e. in addition! Pre and post.
-                x = self.layer_norm_3(x)
-        elif self.post_norm:  # i.e. only, not prenorm, just post
-            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
-            x = self.layer_norm_1(x)
-            x = x + self.drop_path(self.layerscale2(self.ff(x)))
-            x = self.layer_norm_2(x)
-        else:  # Not pre or post norm. Stand well back.
-            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
-            x = x + self.drop_path(self.layerscale2(self.ff(x)))
+            process_x = self.pre_attention_norm(x)
+        else:
+            process_x = x
+
+        processed = self.drop_path(
+            self.layerscale1(self.attn(process_x, process_x, process_x))
+        )
+
+        if self.normformer:
+            processed = self.normformer_norm(processed)
+
+        x = x + processed
+
+        if self.post_norm:
+            x = self.post_attention_norm(x)
+
+        if self.pre_norm:
+            process_x = self.pre_mlp_norm(x)
+        else:
+            process_x = x
+
+        x = x + self.drop_path(self.layerscale2(self.ff(process_x)))
+
+        if self.post_norm:
+            x = self.post_mlp_norm(x)
 
         return x
 
@@ -634,19 +658,33 @@ class TransformerBlock(nn.Module):
         """
         Give back the attention scores used in this layer.
         """
+        # Fix: Use the correct attribute name 'pre_attention_norm'
         if self.pre_norm:
-            x = self.layer_norm_1(x)
+            # We must normalize the input before measuring attention logits
+            # to match what the model actually sees during forward()
+            x = self.pre_attention_norm(x)
             return self.attn.attention_logits(x, x, x)
         else:
             return self.attn.attention_logits(x, x, x)
 
     def reset_parameters(self):
-        self.layer_norm_1.reset_parameters()
-        self.layer_norm_2.reset_parameters()
-        self.layer_norm_3.reset_parameters()
+        if self.pre_norm:
+            self.pre_attention_norm.reset_parameters()
+            self.pre_mlp_norm.reset_parameters()
+
+        if self.post_norm:
+            self.post_attention_norm.reset_parameters()
+            self.post_mlp_norm.reset_parameters()
+
+        if self.normformer:
+            self.normformer_norm.reset_parameters()
 
         self.attn.reset_parameters()
         self.ff.reset_parameters()
+
+        if self.layerscale:
+            self.layerscale1.reset_parameters()
+            self.layerscale2.reset_parameters()
 
 
 class TransformerEncoder(nn.Module):
