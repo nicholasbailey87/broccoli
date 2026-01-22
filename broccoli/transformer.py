@@ -22,12 +22,21 @@ except ImportError:
 
 
 class LayerScale(nn.Module):
-    def __init__(self, dim, init_values=1e-4):
+    def __init__(self, dim, decay=False, init_values=1e-4):
         super().__init__()
-        self.nondecay_scale = nn.Parameter(init_values * torch.ones(dim))
+        self.decay = decay
+        if decay:
+            self.scale = nn.Parameter(init_values * torch.ones(dim))
+            self.nondecay_scale = None
+        else:
+            self.nondecay_scale = nn.Parameter(init_values * torch.ones(dim))
+            self.scale = None
 
     def forward(self, x):
-        return x * self.nondecay_scale
+        if self.decay:
+            return x * self.scale
+        else:
+            return x * self.nondecay_scale
 
 
 def drop_path(
@@ -711,9 +720,10 @@ class TransformerEncoder(nn.Module):
         self.return_utility_tokens = return_utility_tokens
 
         if layerscale:
-            self.layerscale = LayerScale(d_model)
+            rope_and_ape = absolute_position_embedding and relative_position_embedding
+            self.position_layerscale = LayerScale(d_model, decay=rope_and_ape)
         else:
-            self.layerscale = None
+            self.position_layerscale = None
 
         # Initialise utility tokens with normal init, like usual Pytorch embeddings
         if self._utility_tokens:
@@ -807,8 +817,8 @@ class TransformerEncoder(nn.Module):
                     0
                 )  # to shape (1, seq_len) to broadcast over batch
             )
-            if self.layerscale is not None:
-                position_embedding = self.layerscale(position_embedding)
+            if self.position_layerscale is not None:
+                position_embedding = self.position_layerscale(position_embedding)
             x += position_embedding
 
         return x
