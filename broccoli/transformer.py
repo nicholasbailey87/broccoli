@@ -21,29 +21,6 @@ except ImportError:
     FLASH_ATTN = False
 
 
-class LayerScale(nn.Module):
-    def __init__(self, dim, decay=False, init_values=1e-4):
-        super().__init__()
-        self.dim = dim
-        self.decay = decay
-        self.init_values = init_values
-        self.reset_parameters()
-
-    def forward(self, x):
-        if self.decay:
-            return x * self.scale
-        else:
-            return x * self.nondecay_scale
-
-    def reset_parameters(self):
-        if self.decay:
-            self.scale = nn.Parameter(self.init_values * torch.ones(self.dim))
-            self.nondecay_scale = None
-        else:
-            self.nondecay_scale = nn.Parameter(self.init_values * torch.ones(self.dim))
-            self.scale = None
-
-
 def drop_path(
     x, drop_prob: float = 0.0, training: bool = False, scale_by_keep: bool = True
 ):
@@ -527,7 +504,6 @@ class TransformerBlock(nn.Module):
         post_norm=False,
         normformer=False,
         checkpoint_ff=True,
-        layerscale=True,
     ):
         """
         Args:
@@ -555,14 +531,6 @@ class TransformerBlock(nn.Module):
         if self.post_norm:
             self.post_attention_norm = nn.LayerNorm(d_model)
             self.post_mlp_norm = nn.LayerNorm(d_model)
-
-        self.layerscale = layerscale
-        if layerscale:
-            self.layerscale1 = LayerScale(d_model)
-            self.layerscale2 = LayerScale(d_model)
-        else:
-            self.layerscale1 = nn.Identity()
-            self.layerscale2 = nn.Identity()
 
         if relative_position_embedding:
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
@@ -630,9 +598,7 @@ class TransformerBlock(nn.Module):
         else:
             process_x = x
 
-        processed = self.drop_path(
-            self.layerscale1(self.attn(process_x, process_x, process_x))
-        )
+        processed = self.drop_path(self.attn(process_x, process_x, process_x))
 
         if self.normformer:
             processed = self.normformer_norm(processed)
@@ -647,7 +613,7 @@ class TransformerBlock(nn.Module):
         else:
             process_x = x
 
-        x = x + self.drop_path(self.layerscale2(self.ff(process_x)))
+        x = x + self.drop_path(self.ff(process_x))
 
         if self.post_norm:
             x = self.post_mlp_norm(x)
@@ -681,10 +647,6 @@ class TransformerBlock(nn.Module):
 
         self.attn.reset_parameters()
         self.ff.reset_parameters()
-
-        if self.layerscale:
-            self.layerscale1.reset_parameters()
-            self.layerscale2.reset_parameters()
 
 
 class TransformerEncoder(nn.Module):
@@ -722,7 +684,6 @@ class TransformerEncoder(nn.Module):
         normformer=False,
         msa_scaling="d",
         checkpoint_ff=True,
-        layerscale=True,
     ):
         """
         Args:
@@ -756,12 +717,6 @@ class TransformerEncoder(nn.Module):
         self.n_heads = n_heads
         self._utility_tokens = utility_tokens
         self.return_utility_tokens = return_utility_tokens
-
-        if layerscale:
-            rope_and_ape = absolute_position_embedding and relative_position_embedding
-            self.position_layerscale = LayerScale(d_model, decay=rope_and_ape)
-        else:
-            self.position_layerscale = None
 
         # Initialise utility tokens with normal init, like usual Pytorch embeddings
         if self._utility_tokens:
@@ -827,7 +782,6 @@ class TransformerEncoder(nn.Module):
                     post_norm=post_norm,
                     normformer=normformer,
                     checkpoint_ff=checkpoint_ff,
-                    layerscale=layerscale,
                 )
                 for i in range(n_layers)
             ]
@@ -855,8 +809,6 @@ class TransformerEncoder(nn.Module):
                     0
                 )  # to shape (1, seq_len) to broadcast over batch
             )
-            if self.position_layerscale is not None:
-                position_embedding = self.position_layerscale(position_embedding)
             x += position_embedding
 
         return x
