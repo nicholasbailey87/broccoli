@@ -593,12 +593,12 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x):
         if self.pre_norm:
-            x = self.layer_norm_1(x)
+            x = self.pre_attention_norm(x)
             x = x + self.drop_path(self.attn(x, x, x))
-            x = self.layer_norm_2(x)
+            x = self.pre_mlp_norm(x)
             x = x + self.drop_path(self.ff(x))
             if self.post_norm:  # i.e. in addition! Pre and post.
-                x = self.layer_norm_3(x)
+                x = self.post_mlp_norm(x)
 
         # if self.pre_norm:
         #     process_x = self.pre_attention_norm(x)
