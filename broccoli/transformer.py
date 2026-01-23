@@ -599,6 +599,7 @@ class TransformerBlock(nn.Module):
             x = x + self.drop_path(self.ff(x))
             if self.post_norm:  # i.e. in addition! Pre and post.
                 x = self.post_mlp_norm(x)
+        return x
 
         # if self.pre_norm:
         #     process_x = self.pre_attention_norm(x)
