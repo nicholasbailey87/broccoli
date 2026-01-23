@@ -592,33 +592,52 @@ class TransformerBlock(nn.Module):
         return self.attn._kv_distance
 
     def forward(self, x):
-
         if self.pre_norm:
-            process_x = self.pre_attention_norm(x)
-        else:
-            process_x = x
+            x = self.layer_norm_1(x)
+            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
+            x = self.layer_norm_2(x)
+            x = x + self.drop_path(self.layerscale2(self.ff(x)))
+            if self.post_norm:  # i.e. in addition! Pre and post.
+                x = self.layer_norm_3(x)
+        elif self.post_norm:  # i.e. only, not prenorm, just post
+            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
+            x = self.layer_norm_1(x)
+            x = x + self.drop_path(self.layerscale2(self.ff(x)))
+            x = self.layer_norm_2(x)
+        else:  # Not pre or post norm. Stand well back.
+            x = x + self.drop_path(self.layerscale1(self.attn(x, x, x)))
+            x = x + self.drop_path(self.layerscale2(self.ff(x)))
 
-        processed = self.drop_path(self.attn(process_x, process_x, process_x))
+        # if self.pre_norm:
+        #     process_x = self.pre_attention_norm(x)
+        # else:
+        #     process_x = x
 
-        if self.normformer:
-            processed = self.normformer_norm(processed)
+        # processed = self.drop_path(self.attn(process_x, process_x, process_x))
 
-        x = x + processed
+        # if self.normformer:
+        #     processed = self.normformer_norm(processed)
 
-        if self.post_norm:
-            x = self.post_attention_norm(x)
+        # if self.residual_path:
+        #     x = x + processed
 
-        if self.pre_norm:
-            process_x = self.pre_mlp_norm(x)
-        else:
-            process_x = x
+        # if self.post_norm:
+        #     x = self.post_attention_norm(x)
 
-        x = x + self.drop_path(self.ff(process_x))
+        # if self.pre_norm:
+        #     process_x = self.pre_mlp_norm(x)
+        # else:
+        #     process_x = x
 
-        if self.post_norm:
-            x = self.post_mlp_norm(x)
+        # processed = self.drop_path(self.ff(process_x))
 
-        return x
+        # if self.residual_path:
+        #     x = x + processed
+
+        # if self.post_norm:
+        #     x = self.post_mlp_norm(x)
+
+        # return x
 
     def attention_logits(self, x):
         """
