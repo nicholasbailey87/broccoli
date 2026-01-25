@@ -387,9 +387,6 @@ class FeedforwardBlock(nn.Module):
         self.beta = beta
         self.xglu = activation.__name__.endswith("GLU")
 
-        if self.post_norm:
-            self.layernorm = nn.LayerNorm(output_features)
-
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
         else:
@@ -467,9 +464,6 @@ class FeedforwardBlock(nn.Module):
         return processed
 
     def reset_parameters(self):
-        if self.post_norm:
-            self.layernorm.reset_parameters()
-
         # Iterate over the sequential block to reset parameters
         for module in self.process:
             if hasattr(module, "reset_parameters"):
