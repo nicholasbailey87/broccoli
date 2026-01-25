@@ -403,7 +403,7 @@ class ViTEncoder(nn.Module):
                 checkpoint=transformer_checkpoint_ff,
                 beta=self.beta,
             )
-            self.layer_norm = nn.LayerNorm(transformer_embedding_size)
+            self.layer_norm = nn.RMSNorm(transformer_embedding_size)
         else:
             self.initial_ff = None
 
@@ -417,7 +417,7 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.pooling_channels_padding,
-                nn.LayerNorm(transformer_embedding_size),
+                nn.RMSNorm(transformer_embedding_size),
             ]
         )
 

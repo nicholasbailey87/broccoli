@@ -228,6 +228,7 @@ class MHAttention(nn.Module):
 
         freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
 
+        # norm Qs/Ks to protect axial rope, like https://arxiv.org/abs/2302.05442
         q_img = apply_rotary_emb(freqs, self.query_norm(q_img))
         k_img = apply_rotary_emb(freqs, self.key_norm(k_img))
 
@@ -419,7 +420,7 @@ class FeedforwardBlock(nn.Module):
                 self.activation,
                 self.inner_dropout,
                 (
-                    nn.LayerNorm(int(ratio * output_features))
+                    nn.RMSNorm(int(ratio * output_features))
                     if normformer
                     else nn.Identity()
                 ),
@@ -477,13 +478,7 @@ class FeedforwardBlock(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    """
-    Performs LayerNorms first (as in PyTorch Transformers when norm_first=True),
-        which is also what is seen in e.g.
-        https://github.com/karpathy/minGPT/blob/master/mingpt/model.py
-        and is recommended by https://arxiv.org/abs/2002.04745
-
-    """
+    """ """
 
     def __init__(
         self,
@@ -537,16 +532,16 @@ class EncoderBlock(nn.Module):
         self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
         if self.pre_norm:
-            self.pre_attention_norm = nn.LayerNorm(d_model)
-            self.pre_mlp_norm = nn.LayerNorm(d_model)
+            self.pre_attention_norm = nn.RMSNorm(d_model)
+            self.pre_mlp_norm = nn.RMSNorm(d_model)
 
         if normformer:
-            self.normformer_norm = nn.LayerNorm(d_model)
+            self.normformer_norm = nn.RMSNorm(d_model)
 
         if self.post_norm:
-            self.input_norm = nn.LayerNorm(d_model)
-            self.post_attention_norm = nn.LayerNorm(d_model)
-            self.post_mlp_norm = nn.LayerNorm(d_model)
+            self.input_norm = nn.RMSNorm(d_model)
+            self.post_attention_norm = nn.RMSNorm(d_model)
+            self.post_mlp_norm = nn.RMSNorm(d_model)
 
         if relative_position_embedding:
             max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
