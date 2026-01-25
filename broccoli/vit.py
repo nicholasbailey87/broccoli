@@ -416,7 +416,7 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.pooling_channels_padding,
-                nn.LayerNorm(),
+                nn.LayerNorm(transformer_embedding_size),
             ]
         )
 
