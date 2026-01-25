@@ -612,10 +612,12 @@ class EncoderBlock(nn.Module):
         else:
             process_x = x
 
-        processed = self.drop_path(self.attn(process_x, process_x, process_x))
+        processed = self.attn(process_x, process_x, process_x)
 
         if self.normformer:
             processed = self.normformer_norm(processed)
+
+        processed = self.drop_path(processed)
 
         x = self.alpha * x + processed
 
