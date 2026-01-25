@@ -158,7 +158,6 @@ class ViTEncoder(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
-        transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
         transformer_initial_ff_dropout=None,
@@ -352,6 +351,8 @@ class ViTEncoder(nn.Module):
                 normformer=transformer_normformer,
                 post_norm=transformer_post_norm,
                 checkpoint_ff=transformer_checkpoint_ff,
+                alpha=self.alpha,
+                beta=self.beta,
             )
         else:
             self.transformer = nn.Identity()
@@ -393,16 +394,14 @@ class ViTEncoder(nn.Module):
                     or transformer_ff_linear_module_down
                     or linear_module
                 ),
-                pre_norm=transformer_pre_norm,
                 normformer=transformer_normformer,
-                post_norm=transformer_post_norm,
-                residual_path=transformer_initial_ff_residual_path,
                 checkpoint=transformer_checkpoint_ff,
+                beta=self.beta,
             )
         else:
             self.initial_ff = nn.Identity()
 
-        self.encoder = nn.Sequential(
+        self.preprocess = nn.Sequential(
             *[
                 batchnormxd(in_channels) if initial_batch_norm else nn.Identity(),
                 self.cnn,
@@ -412,19 +411,21 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.pooling_channels_padding,
-                self.initial_ff,
-                self.transformer,
+                nn.LayerNorm(),
             ]
         )
 
         self.reset_parameters()
 
     def forward(self, x):
-        return self.encoder(x)
+        x = self.preprocess(x)
+        x = x + self.initial_ff(x)
+        return self.transformer(x)
 
     def attention_logits(self, x):
-        x = self.encoder[:-1](x)
-        return self.encoder[-1].attention_logits(x)
+        x = self.preprocess(x)
+        x = x + self.initial_ff(x)
+        return self.transformer.attention_logits(x)
 
     def reset_parameters(self):
         for module in self.encoder:
@@ -458,7 +459,6 @@ class ViT(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
-        transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
         transformer_initial_ff_dropout=None,
@@ -530,7 +530,6 @@ class ViT(nn.Module):
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
             transformer_feedforward_first=transformer_feedforward_first,
-            transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
             transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
             transformer_initial_ff_linear_module_down=transformer_initial_ff_linear_module_down,
             transformer_initial_ff_dropout=transformer_initial_ff_dropout,

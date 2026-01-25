@@ -21,6 +21,12 @@ except ImportError:
     FLASH_ATTN = False
 
 
+def scale_parameters(torch_module: nn.Module, factor: float):
+    with torch.no_grad():
+        for param in torch_module.parameters():
+            param.mul_(factor)
+
+
 def drop_path(
     x, drop_prob: float = 0.0, training: bool = False, scale_by_keep: bool = True
 ):
@@ -83,6 +89,7 @@ class MHAttention(nn.Module):
         rotary_embedding=None,
         source_size=None,
         scaling="d",
+        beta=1.0,
     ):
         """
         Args:
@@ -111,6 +118,7 @@ class MHAttention(nn.Module):
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
         self.scaling = scaling
+        self.beta = beta
 
         self.head_dim = self.embed_dim // self.n_heads
 
@@ -192,17 +200,26 @@ class MHAttention(nn.Module):
                 "`source_size` must be a tuple of 1, 2 or 3 integers"
             )
 
-        q_util, q_img = q[:, : self.utility_tokens, :], q[:, self.utility_tokens :, :]
-        k_util, k_img = k[:, : self.utility_tokens, :], k[:, self.utility_tokens :, :]
+        q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
+        k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
+
+        q_util, q_img = (
+            q[:, : self.utility_tokens, :, :],
+            q[:, self.utility_tokens :, :, :],
+        )
+        k_util, k_img = (
+            k[:, : self.utility_tokens, :, :],
+            k[:, self.utility_tokens :, :, :],
+        )
 
         q_img = rearrange(
             q_img,
-            f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
+            f"b ({spatial_dimension_names}) h d -> b {spatial_dimension_names} h d",
             **spatial_dimension_values,
         )
         k_img = rearrange(
             k_img,
-            f"b ({spatial_dimension_names}) d -> b {spatial_dimension_names} d",
+            f"b ({spatial_dimension_names}) h d -> b {spatial_dimension_names} h d",
             **spatial_dimension_values,
         )
 
@@ -213,16 +230,19 @@ class MHAttention(nn.Module):
 
         q_img = rearrange(
             q_img,
-            f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
+            f"b {spatial_dimension_names} h d -> b ({spatial_dimension_names}) h d",
         )
         k_img = rearrange(
             k_img,
-            f"b {spatial_dimension_names} d -> b ({spatial_dimension_names}) d",
+            f"b {spatial_dimension_names} h d -> b ({spatial_dimension_names}) h d",
         )
 
         # Re-combine the utility tokens and the RoPE-enhanced sequence tokens
         q = torch.cat([q_util, q_img], dim=1)
         k = torch.cat([k_util, k_img], dim=1)
+
+        q = rearrange(q, "b t h d -> b t (h d)")
+        k = rearrange(k, "b t h d -> b t (h d)")
 
         return q, k
 
@@ -330,7 +350,10 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
+        scale_parameters(self.v_proj, self.beta)  # per Microsoft DeepNet
         self.out_proj.reset_parameters()
+        scale_parameters(self.out_proj, self.beta)  # per Microsoft DeepNet
+
         if self.talking_heads:
             # Initialize close to identity
             nn.init.eye_(self.head_projection.weight)
@@ -354,17 +377,14 @@ class FeedforwardBlock(nn.Module):
         outer_dropout=None,
         linear_module_up=nn.Linear,
         linear_module_down=nn.Linear,
-        pre_norm=True,
         normformer=False,
-        post_norm=True,
-        residual_path=True,
         checkpoint=True,
+        beta=1.0,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
-        self.residual_path = residual_path
-        self.post_norm = post_norm
+        self.beta = beta
         self.xglu = activation.__name__.endswith("GLU")
 
         if self.residual_path and (output_features < input_features):
@@ -402,7 +422,6 @@ class FeedforwardBlock(nn.Module):
 
         self.process = nn.Sequential(
             *[
-                nn.LayerNorm(input_features) if pre_norm else nn.Identity(),
                 self.linear_in,
                 self.activation,
                 self.inner_dropout,
@@ -452,12 +471,7 @@ class FeedforwardBlock(nn.Module):
         else:
             processed = self.process(x)
 
-        if self.residual_path and self.post_norm:
-            return self.layernorm(x + processed)
-        elif self.residual_path:
-            return x + processed
-        else:
-            return processed
+        return processed
 
     def reset_parameters(self):
         if self.post_norm:
@@ -468,8 +482,11 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
+        scale_parameters(self.linear_in, self.beta)  # per Microsoft DeepNet
+        scale_parameters(self.linear_out, self.beta)
 
-class TransformerBlock(nn.Module):
+
+class EncoderBlock(nn.Module):
     """
     Performs LayerNorms first (as in PyTorch Transformers when norm_first=True),
         which is also what is seen in e.g.
@@ -504,6 +521,8 @@ class TransformerBlock(nn.Module):
         post_norm=False,
         normformer=False,
         checkpoint_ff=True,
+        alpha=1.0,
+        beta=1.0,
     ):
         """
         Args:
@@ -515,9 +534,15 @@ class TransformerBlock(nn.Module):
 
         super().__init__()
 
+        if pre_norm and post_norm:
+            raise ValueError("A transformer cannot be both prenorm and postnorm.")
+
         self.pre_norm = pre_norm
         self.post_norm = post_norm
         self.normformer = normformer
+
+        self.alpha = alpha
+        self.beta = beta
 
         self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
@@ -529,6 +554,7 @@ class TransformerBlock(nn.Module):
             self.normformer_norm = nn.LayerNorm(d_model)
 
         if self.post_norm:
+            self.input_norm = nn.LayerNorm(d_model)
             self.post_attention_norm = nn.LayerNorm(d_model)
             self.post_mlp_norm = nn.LayerNorm(d_model)
 
@@ -556,6 +582,7 @@ class TransformerBlock(nn.Module):
             utility_tokens=utility_tokens,
             talking_heads=talking_heads,
             scaling=msa_scaling,
+            beta=beta,
         )
 
         # Submodule for the feedforward process
@@ -578,11 +605,9 @@ class TransformerBlock(nn.Module):
                 if ff_linear_module_down is not None
                 else linear_module
             ),
-            pre_norm=False,  # Handled outside the block
             normformer=normformer,
-            post_norm=False,  # Handled outside the block
-            residual_path=False,  # Handled outside the block
             checkpoint=checkpoint_ff,
+            beta=beta,
         )
 
         self.reset_parameters()
@@ -592,45 +617,36 @@ class TransformerBlock(nn.Module):
         return self.attn._kv_distance
 
     def forward(self, x):
+        if self.post_norm:
+            x = self.input_norm(x)
+
         if self.pre_norm:
-            x = self.pre_attention_norm(x)
-            x = x + self.drop_path(self.attn(x, x, x))
-            x = self.pre_mlp_norm(x)
-            x = x + self.drop_path(self.ff(x))
-            if self.post_norm:  # i.e. in addition! Pre and post.
-                x = self.post_mlp_norm(x)
+            process_x = self.pre_attention_norm(x)
+        else:
+            process_x = x
+
+        processed = self.drop_path(self.attn(process_x, process_x, process_x))
+
+        if self.normformer:
+            processed = self.normformer_norm(processed)
+
+        x = self.alpha * x + processed
+
+        if self.post_norm:
+            x = self.post_attention_norm(x)
+        elif self.pre_norm:
+            process_x = self.pre_mlp_norm(x)
+        else:
+            process_x = x
+
+        processed = self.drop_path(self.ff(process_x))
+
+        x = self.alpha * x + processed
+
+        if self.post_norm:
+            x = self.post_mlp_norm(x)
+
         return x
-
-        # if self.pre_norm:
-        #     process_x = self.pre_attention_norm(x)
-        # else:
-        #     process_x = x
-
-        # processed = self.drop_path(self.attn(process_x, process_x, process_x))
-
-        # if self.normformer:
-        #     processed = self.normformer_norm(processed)
-
-        # if self.residual_path:
-        #     x = x + processed
-
-        # if self.post_norm:
-        #     x = self.post_attention_norm(x)
-
-        # if self.pre_norm:
-        #     process_x = self.pre_mlp_norm(x)
-        # else:
-        #     process_x = x
-
-        # processed = self.drop_path(self.ff(process_x))
-
-        # if self.residual_path:
-        #     x = x + processed
-
-        # if self.post_norm:
-        #     x = self.post_mlp_norm(x)
-
-        # return x
 
     def attention_logits(self, x):
         """
@@ -696,6 +712,8 @@ class TransformerEncoder(nn.Module):
         normformer=False,
         msa_scaling="d",
         checkpoint_ff=True,
+        alpha=1.0,
+        beta=1.0,
     ):
         """
         Args:
@@ -769,7 +787,7 @@ class TransformerEncoder(nn.Module):
 
         self.blocks = nn.ModuleList(
             [
-                TransformerBlock(
+                EncoderBlock(
                     self.full_sequence_length,
                     d_model,
                     n_heads,
@@ -794,6 +812,8 @@ class TransformerEncoder(nn.Module):
                     post_norm=post_norm,
                     normformer=normformer,
                     checkpoint_ff=checkpoint_ff,
+                    alpha=alpha,
+                    beta=beta,
                 )
                 for i in range(n_layers)
             ]
