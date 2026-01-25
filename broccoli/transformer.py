@@ -387,13 +387,6 @@ class FeedforwardBlock(nn.Module):
         self.beta = beta
         self.xglu = activation.__name__.endswith("GLU")
 
-        if self.residual_path and (output_features < input_features):
-            raise ValueError(
-                "If the number of output features will be less than "
-                "the number of input features, then `residual_path` "
-                "should be set to False."
-            )
-
         if self.post_norm:
             self.layernorm = nn.LayerNorm(output_features)
 
