@@ -122,6 +122,9 @@ class MHAttention(nn.Module):
 
         self.head_dim = self.embed_dim // self.n_heads
 
+        self.query_norm = nn.RMSNorm(self.head_dim)
+        self.key_norm = nn.RMSNorm(self.head_dim)
+
         if self.scaling == "sqrtd":
             self.scaling_factor = 1 / math.sqrt(self.head_dim)
         elif self.scaling == "d":
@@ -225,8 +228,8 @@ class MHAttention(nn.Module):
 
         freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
 
-        q_img = apply_rotary_emb(freqs, q_img)
-        k_img = apply_rotary_emb(freqs, k_img)
+        q_img = apply_rotary_emb(freqs, self.query_norm(q_img))
+        k_img = apply_rotary_emb(freqs, self.key_norm(k_img))
 
         q_img = rearrange(
             q_img,
