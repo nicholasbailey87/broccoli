@@ -433,9 +433,11 @@ class ViTEncoder(nn.Module):
         return self.transformer.attention_logits(x)
 
     def reset_parameters(self):
-        for module in self.encoder:
+        for module in self.preprocess:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
+        self.initial_ff.reset_parameters()
+        self.transformer.reset_parameters()
 
 
 class ViT(nn.Module):
