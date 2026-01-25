@@ -403,8 +403,9 @@ class ViTEncoder(nn.Module):
                 checkpoint=transformer_checkpoint_ff,
                 beta=self.beta,
             )
+            self.layer_norm = nn.LayerNorm(transformer_embedding_size)
         else:
-            self.initial_ff = nn.Identity()
+            self.initial_ff = None
 
         self.preprocess = nn.Sequential(
             *[
@@ -424,7 +425,8 @@ class ViTEncoder(nn.Module):
 
     def forward(self, x):
         x = self.preprocess(x)
-        x = x + self.initial_ff(x)
+        if self.initial_ff is not None:
+            x = self.layer_norm(x + self.initial_ff(x))
         return self.transformer(x)
 
     def attention_logits(self, x):
@@ -498,8 +500,6 @@ class ViT(nn.Module):
         batch_norm_logits=True,
         logit_projection_layer=nn.Linear,
         linear_module=nn.Linear,
-        alpha=1.0,
-        beta=1.0,
     ):
 
         super().__init__()
@@ -520,8 +520,9 @@ class ViT(nn.Module):
                 "SwiGLU": SwiGLU,
             }[transformer_activation]
 
-        self.alpha = alpha
-        self.beta = beta
+        # Set alpha and beta according to Microsoft's DeepNorm
+        self.alpha = (2 * transformer_layers) ** 0.25
+        self.beta = (8 * transformer_layers) ** 0.25
 
         self.encoder = ViTEncoder(
             input_size=input_size,
@@ -571,8 +572,8 @@ class ViT(nn.Module):
             transformer_stochastic_depth=transformer_stochastic_depth,
             transformer_checkpoint_ff=transformer_checkpoint_ff,
             linear_module=linear_module,
-            alpha=alpha,
-            beta=beta,
+            alpha=self.alpha,
+            beta=self.beta,
         )
 
         self.pool = head(

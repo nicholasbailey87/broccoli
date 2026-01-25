@@ -604,8 +604,6 @@ class EncoderBlock(nn.Module):
         return self.attn._kv_distance
 
     def forward(self, x):
-        if self.post_norm:
-            x = self.input_norm(x)
 
         if self.pre_norm:
             process_x = self.pre_attention_norm(x)
