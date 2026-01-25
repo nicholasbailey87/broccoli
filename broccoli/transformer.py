@@ -621,6 +621,7 @@ class EncoderBlock(nn.Module):
 
         if self.post_norm:
             x = self.post_attention_norm(x)
+            process_x = x
         elif self.pre_norm:
             process_x = self.pre_mlp_norm(x)
         else:
@@ -638,15 +639,15 @@ class EncoderBlock(nn.Module):
     def attention_logits(self, x):
         """
         Give back the attention scores used in this layer.
+        Needs to match what the model actually sees during forward()
+        by applying the correct normalisations.
         """
-        # Fix: Use the correct attribute name 'pre_attention_norm'
         if self.pre_norm:
-            # We must normalize the input before measuring attention logits
-            # to match what the model actually sees during forward()
             x = self.pre_attention_norm(x)
-            return self.attn.attention_logits(x, x, x)
-        else:
-            return self.attn.attention_logits(x, x, x)
+        elif self.post_norm:
+            x = self.input_norm(x)
+
+        return self.attn.attention_logits(x, x, x)
 
     def reset_parameters(self):
         if self.pre_norm:
