@@ -200,26 +200,26 @@ class MHAttention(nn.Module):
                 "`source_size` must be a tuple of 1, 2 or 3 integers"
             )
 
-        q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
-        k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
+        q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
+        k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
 
         q_util, q_img = (
-            q[:, : self.utility_tokens, :, :],
-            q[:, self.utility_tokens :, :, :],
+            q[:, :, : self.utility_tokens, :],
+            q[:, :, self.utility_tokens :, :],
         )
         k_util, k_img = (
-            k[:, : self.utility_tokens, :, :],
-            k[:, self.utility_tokens :, :, :],
+            k[:, :, : self.utility_tokens, :],
+            k[:, :, self.utility_tokens :, :],
         )
 
         q_img = rearrange(
             q_img,
-            f"b ({spatial_dimension_names}) h d -> b {spatial_dimension_names} h d",
+            f"b h ({spatial_dimension_names}) d -> b h {spatial_dimension_names} d",
             **spatial_dimension_values,
         )
         k_img = rearrange(
             k_img,
-            f"b ({spatial_dimension_names}) h d -> b {spatial_dimension_names} h d",
+            f"b h ({spatial_dimension_names}) d -> b h {spatial_dimension_names} d",
             **spatial_dimension_values,
         )
 
@@ -230,19 +230,19 @@ class MHAttention(nn.Module):
 
         q_img = rearrange(
             q_img,
-            f"b {spatial_dimension_names} h d -> b ({spatial_dimension_names}) h d",
+            f"b h {spatial_dimension_names} d -> b h ({spatial_dimension_names}) d",
         )
         k_img = rearrange(
             k_img,
-            f"b {spatial_dimension_names} h d -> b ({spatial_dimension_names}) h d",
+            f"b h {spatial_dimension_names} d -> b h ({spatial_dimension_names}) d",
         )
 
         # Re-combine the utility tokens and the RoPE-enhanced sequence tokens
-        q = torch.cat([q_util, q_img], dim=1)
-        k = torch.cat([k_util, k_img], dim=1)
+        q = torch.cat([q_util, q_img], dim=2)
+        k = torch.cat([k_util, k_img], dim=2)
 
-        q = rearrange(q, "b t h d -> b t (h d)")
-        k = rearrange(k, "b t h d -> b t (h d)")
+        q = rearrange(q, "b h t d -> b t (h d)")
+        k = rearrange(k, "b h t d -> b t (h d)")
 
         return q, k
 
