@@ -187,8 +187,13 @@ class ViTEncoder(nn.Module):
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
         linear_module=nn.Linear,
+        alpha=1.0,
+        beta=1.0,
     ):
         super().__init__()
+
+        self.alpha = alpha
+        self.beta = beta
 
         if cnn_activation_kwargs is not None:
             self.cnn_activation = cnn_activation(**cnn_activation_kwargs)
@@ -491,6 +496,8 @@ class ViT(nn.Module):
         batch_norm_logits=True,
         logit_projection_layer=nn.Linear,
         linear_module=nn.Linear,
+        alpha=1.0,
+        beta=1.0,
     ):
 
         super().__init__()
@@ -510,6 +517,9 @@ class ViT(nn.Module):
                 "GELU": GELU,
                 "SwiGLU": SwiGLU,
             }[transformer_activation]
+
+        self.alpha = alpha
+        self.beta = beta
 
         self.encoder = ViTEncoder(
             input_size=input_size,
@@ -559,6 +569,8 @@ class ViT(nn.Module):
             transformer_stochastic_depth=transformer_stochastic_depth,
             transformer_checkpoint_ff=transformer_checkpoint_ff,
             linear_module=linear_module,
+            alpha=alpha,
+            beta=beta,
         )
 
         self.pool = head(
