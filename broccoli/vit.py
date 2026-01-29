@@ -522,7 +522,8 @@ class ViT(nn.Module):
 
         # Set alpha and beta according to Microsoft's DeepNorm
         self.alpha = (2 * transformer_layers) ** 0.25
-        self.beta = (8 * transformer_layers) ** -0.25
+        # beta is only needed for very deep models
+        self.beta = 1 if transformer_layers < 50 else (8 * transformer_layers) ** -0.25
 
         self.encoder = ViTEncoder(
             input_size=input_size,
