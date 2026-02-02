@@ -354,9 +354,17 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
-        scale_parameters(self.v_proj, self.beta)  # per Microsoft DeepNet
+        scale_parameters(
+            self.v_proj,
+            math.sqrt(6)
+            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
+        )
         self.out_proj.reset_parameters()
-        scale_parameters(self.out_proj, self.beta)  # per Microsoft DeepNet
+        scale_parameters(
+            self.out_proj,
+            math.sqrt(6)
+            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
+        )
 
         if self.talking_heads:
             # Initialize close to identity
@@ -473,8 +481,16 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(self.linear_in, self.beta)  # per Microsoft DeepNet
-        scale_parameters(self.linear_out, self.beta)
+        scale_parameters(
+            self.linear_in,
+            math.sqrt(6)
+            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
+        )
+        scale_parameters(
+            self.linear_out,
+            math.sqrt(6)
+            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
+        )
 
 
 class EncoderBlock(nn.Module):
