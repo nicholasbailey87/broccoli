@@ -520,13 +520,8 @@ class ViT(nn.Module):
                 "SwiGLU": SwiGLU,
             }[transformer_activation]
 
-        # Set alpha according to Microsoft's DeepNorm if layers > 50
-        if transformer_layers > 50:
-            self.alpha = (2 * transformer_layers) ** 0.25
-            self.beta = 1.0  # beta is not needed as we norm the Q and K vectors in MSA!
-        else:
-            self.alpha = 1.0
-            self.beta = 1.0  # beta is not needed as we norm the Q and K vectors in MSA!
+        self.alpha = (2 * transformer_layers) ** 0.25
+        self.beta = 1.0  # beta is not needed if we norm the Q and K vectors in MSA!
 
         self.encoder = ViTEncoder(
             input_size=input_size,
