@@ -122,9 +122,6 @@ class MHAttention(nn.Module):
 
         self.head_dim = self.embed_dim // self.n_heads
 
-        self.query_norm = nn.RMSNorm(self.head_dim)
-        self.key_norm = nn.RMSNorm(self.head_dim)
-
         if self.scaling == "sqrtd":
             self.scaling_factor = 1 / math.sqrt(self.head_dim)
         elif self.scaling == "d":
@@ -229,8 +226,8 @@ class MHAttention(nn.Module):
         freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
 
         # norm Qs/Ks to protect axial rope, like https://arxiv.org/abs/2302.05442
-        q_img = apply_rotary_emb(freqs, self.query_norm(q_img))
-        k_img = apply_rotary_emb(freqs, self.key_norm(k_img))
+        q_img = apply_rotary_emb(freqs, q_img)
+        k_img = apply_rotary_emb(freqs, k_img)
 
         q_img = rearrange(
             q_img,
@@ -354,17 +351,9 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
-        scale_parameters(
-            self.v_proj,
-            math.sqrt(6)
-            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
-        )
+        scale_parameters(self.v_proj, self.beta)
         self.out_proj.reset_parameters()
-        scale_parameters(
-            self.out_proj,
-            math.sqrt(6)
-            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
-        )
+        scale_parameters(self.out_proj, self.beta)
 
         if self.talking_heads:
             # Initialize close to identity
@@ -481,16 +470,8 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(
-            self.linear_in,
-            math.sqrt(6)
-            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
-        )
-        scale_parameters(
-            self.linear_out,
-            math.sqrt(6)
-            * self.beta,  # sqrt(6) to compensate for PyTorch tiny default init
-        )
+        scale_parameters(self.linear_in, self.beta)
+        scale_parameters(self.linear_out, self.beta)
 
 
 class EncoderBlock(nn.Module):

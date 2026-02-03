@@ -521,7 +521,7 @@ class ViT(nn.Module):
             }[transformer_activation]
 
         self.alpha = (2 * transformer_layers) ** 0.25
-        self.beta = 1.0  # beta is not needed if we norm the Q and K vectors in MSA!
+        self.beta = (8 * transformer_layers) ** 0.25
 
         self.encoder = ViTEncoder(
             input_size=input_size,
