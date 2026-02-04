@@ -89,7 +89,6 @@ class MHAttention(nn.Module):
         rotary_embedding=None,
         source_size=None,
         scaling="d",
-        beta=1.0,
     ):
         """
         Args:
@@ -118,7 +117,6 @@ class MHAttention(nn.Module):
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
         self.scaling = scaling
-        self.beta = beta
 
         self.head_dim = self.embed_dim // self.n_heads
 
@@ -351,9 +349,9 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
-        scale_parameters(self.v_proj, self.beta)
+        scale_parameters(self.v_proj, math.pi)
         self.out_proj.reset_parameters()
-        scale_parameters(self.out_proj, self.beta)
+        scale_parameters(self.out_proj, math.pi)
 
         if self.talking_heads:
             # Initialize close to identity
@@ -380,12 +378,10 @@ class FeedforwardBlock(nn.Module):
         linear_module_down=nn.Linear,
         normformer=False,
         checkpoint=True,
-        beta=1.0,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
-        self.beta = beta
         self.xglu = activation.__name__.endswith("GLU")
 
         if activation_kwargs is not None:
@@ -471,8 +467,9 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(self.linear_in, self.beta)
-        scale_parameters(self.linear_out, self.beta)
+        if self.normformer:
+            scale_parameters(self.linear_in, math.pi)
+            scale_parameters(self.linear_out, math.pi)
 
 
 class EncoderBlock(nn.Module):
@@ -613,7 +610,7 @@ class EncoderBlock(nn.Module):
 
         processed = self.drop_path(processed)
 
-        x = self.alpha * x + processed
+        x = self.alpha * x + self.beta * processed
 
         if self.post_norm:
             x = self.post_attention_norm(x)
@@ -625,7 +622,7 @@ class EncoderBlock(nn.Module):
 
         processed = self.drop_path(self.ff(process_x))
 
-        x = self.alpha * x + processed
+        x = self.alpha * x + self.beta * processed
 
         if self.post_norm:
             x = self.post_mlp_norm(x)
