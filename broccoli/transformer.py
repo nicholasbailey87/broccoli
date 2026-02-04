@@ -562,7 +562,6 @@ class EncoderBlock(nn.Module):
             utility_tokens=utility_tokens,
             talking_heads=talking_heads,
             scaling=msa_scaling,
-            beta=beta,
         )
 
         # Submodule for the feedforward process
@@ -587,7 +586,6 @@ class EncoderBlock(nn.Module):
             ),
             normformer=normformer,
             checkpoint=checkpoint_ff,
-            beta=beta,
         )
 
         self.reset_parameters()
