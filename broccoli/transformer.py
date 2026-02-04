@@ -422,11 +422,7 @@ class FeedforwardBlock(nn.Module):
                 ),
                 self.inner_dropout,
                 self.linear_out,
-                (
-                    nn.RMSNorm(int(ratio * output_features))
-                    if normformer
-                    else nn.Identity()
-                ),
+                (nn.RMSNorm(output_features) if normformer else nn.Identity()),
                 self.outer_dropout,
             ]
         )
