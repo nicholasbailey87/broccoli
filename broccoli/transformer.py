@@ -89,6 +89,7 @@ class MHAttention(nn.Module):
         rotary_embedding=None,
         source_size=None,
         scaling="d",
+        scale_v_scale_out=1.0,
     ):
         """
         Args:
@@ -98,6 +99,8 @@ class MHAttention(nn.Module):
                 "Tensor Programs V...". Default "d"
         """
         super().__init__()
+
+        self.scale_v_scale_out = scale_v_scale_out
 
         if rotary_embedding is not None:
             assert source_size is not None
@@ -349,9 +352,9 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
-        scale_parameters(self.v_proj, 3.25)
+        scale_parameters(self.v_proj, self.scale_v_scale_out)
         self.out_proj.reset_parameters()
-        scale_parameters(self.out_proj, 3.25)
+        scale_parameters(self.out_proj, self.scale_v_scale_out)
 
         if self.talking_heads:
             # Initialize close to identity
@@ -378,11 +381,13 @@ class FeedforwardBlock(nn.Module):
         linear_module_down=nn.Linear,
         normformer=False,
         checkpoint=True,
+        scale_weights=1.0,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
         self.xglu = activation.__name__.endswith("GLU")
+        self.scale_weights = scale_weights
 
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
@@ -467,8 +472,8 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(self.linear_in, 3.25)
-        scale_parameters(self.linear_out, 3.25)
+        scale_parameters(self.linear_in, self.scale_weights)
+        scale_parameters(self.linear_out, self.scale_weights)
 
 
 class EncoderBlock(nn.Module):
@@ -496,12 +501,13 @@ class EncoderBlock(nn.Module):
         identity_probability=0.0,
         causal=False,
         linear_module=nn.Linear,
-        pre_norm=True,
-        post_norm=False,
-        normformer=False,
+        pre_norm=False,
+        post_norm=True,
+        normformer=True,
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
+        scale_branch_weights=1.0,
     ):
         """
         Args:
@@ -561,6 +567,7 @@ class EncoderBlock(nn.Module):
             utility_tokens=utility_tokens,
             talking_heads=talking_heads,
             scaling=msa_scaling,
+            scale_v_scale_out=scale_branch_weights,
         )
 
         # Submodule for the feedforward process
@@ -585,6 +592,7 @@ class EncoderBlock(nn.Module):
             ),
             normformer=normformer,
             checkpoint=checkpoint_ff,
+            scale_weights=scale_branch_weights,
         )
 
         self.reset_parameters()
@@ -692,6 +700,7 @@ class TransformerEncoder(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
+        scale_branch_weights=1.0,
     ):
         """
         Args:
@@ -792,6 +801,7 @@ class TransformerEncoder(nn.Module):
                     checkpoint_ff=checkpoint_ff,
                     alpha=alpha,
                     beta=beta,
+                    scale_branch_weights=scale_branch_weights,
                 )
                 for i in range(n_layers)
             ]
