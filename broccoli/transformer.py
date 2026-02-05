@@ -349,9 +349,9 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
-        scale_parameters(self.v_proj, math.pi)
+        scale_parameters(self.v_proj, 3.25)
         self.out_proj.reset_parameters()
-        scale_parameters(self.out_proj, math.pi)
+        scale_parameters(self.out_proj, 3.25)
 
         if self.talking_heads:
             # Initialize close to identity
@@ -467,8 +467,8 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(self.linear_in, math.pi)
-        scale_parameters(self.linear_out, math.pi)
+        scale_parameters(self.linear_in, 3.25)
+        scale_parameters(self.linear_out, 3.25)
 
 
 class EncoderBlock(nn.Module):
