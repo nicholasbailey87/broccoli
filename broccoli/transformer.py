@@ -467,9 +467,8 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        if self.normformer:
-            scale_parameters(self.linear_in, math.pi)
-            scale_parameters(self.linear_out, math.pi)
+        scale_parameters(self.linear_in, math.pi)
+        scale_parameters(self.linear_out, math.pi)
 
 
 class EncoderBlock(nn.Module):
