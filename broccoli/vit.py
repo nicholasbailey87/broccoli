@@ -403,7 +403,7 @@ class ViTEncoder(nn.Module):
                 ),
                 normformer=transformer_normformer,
                 checkpoint=transformer_checkpoint_ff,
-                beta=self.beta,
+                scale_weights=transformer_scale_branch_weights,
             )
             self.layer_norm = nn.RMSNorm(transformer_embedding_size)
         else:
