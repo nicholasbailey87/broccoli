@@ -370,8 +370,9 @@ class FeedforwardBlock(nn.Module):
     def __init__(
         self,
         input_features,
-        ratio,
         output_features,
+        ratio=4,
+        inner_size=None,
         activation=nn.ReLU,
         activation_kwargs=None,
         dropout=0.0,
@@ -402,10 +403,11 @@ class FeedforwardBlock(nn.Module):
         )
 
         self.max_features = (
-            2 * int(ratio * output_features)
-            if self.xglu
-            else int(ratio * output_features)
+            int(ratio * output_features) if inner_size is None else inner_size
         )
+
+        if self.xglu:
+            self.max_features *= 2
 
         self.linear_in = linear_module_up(input_features, self.max_features)
         self.linear_out = linear_module_down(
@@ -488,7 +490,8 @@ class EncoderBlock(nn.Module):
         source_size=None,
         utility_tokens=0,
         talking_heads=False,
-        mlp_ratio=4,
+        ff_ratio=4,
+        ff_inner_size=None,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
         ff_linear_module_up=None,
@@ -555,6 +558,13 @@ class EncoderBlock(nn.Module):
         else:
             self.rotary_embedding = None
 
+        if self.normformer:
+            mha_internal_beta = scale_branch_weights
+            ff_internal_beta = scale_branch_weights
+        else:
+            mha_internal_beta = beta
+            ff_internal_beta = beta
+
         self.attn = MHAttention(  # Handles QKV projection
             d_model,
             n_heads,
@@ -567,14 +577,15 @@ class EncoderBlock(nn.Module):
             utility_tokens=utility_tokens,
             talking_heads=talking_heads,
             scaling=msa_scaling,
-            scale_v_scale_out=scale_branch_weights,
+            scale_v_scale_out=mha_internal_beta,
         )
 
         # Submodule for the feedforward process
         self.ff = FeedforwardBlock(
             d_model,
-            mlp_ratio,
             d_model,
+            ff_ratio=ff_ratio,
+            ff_inner_size=ff_inner_size,
             activation=activation,
             activation_kwargs=activation_kwargs,
             dropout=ff_dropout,
@@ -592,7 +603,7 @@ class EncoderBlock(nn.Module):
             ),
             normformer=normformer,
             checkpoint=checkpoint_ff,
-            scale_weights=scale_branch_weights,
+            scale_weights=ff_internal_beta,
         )
 
         self.reset_parameters()
@@ -615,7 +626,10 @@ class EncoderBlock(nn.Module):
 
         processed = self.drop_path(processed)
 
-        x = self.alpha * x + self.beta * processed
+        if self.normformer:
+            processed = self.beta * processed
+
+        x = self.alpha * x + processed
 
         if self.post_norm:
             x = self.post_attention_norm(x)
@@ -627,7 +641,10 @@ class EncoderBlock(nn.Module):
 
         processed = self.drop_path(self.ff(process_x))
 
-        x = self.alpha * x + self.beta * processed
+        if self.normformer:
+            processed = self.beta * processed
+
+        x = self.alpha * x + processed
 
         if self.post_norm:
             x = self.post_mlp_norm(x)
@@ -678,7 +695,8 @@ class TransformerEncoder(nn.Module):
         absolute_position_embedding=True,
         relative_position_embedding=False,
         source_size=None,
-        mlp_ratio=4,
+        ff_ratio=4,
+        ff_inner_size=None,
         activation: nn.Module = nn.ReLU,
         activation_kwargs: Optional[dict] = None,
         ff_linear_module_up=None,
@@ -782,7 +800,8 @@ class TransformerEncoder(nn.Module):
                     source_size=source_size,
                     utility_tokens=utility_tokens,
                     talking_heads=talking_heads,
-                    mlp_ratio=mlp_ratio,
+                    ff_ratio=ff_ratio,
+                    ff_inner_size=ff_inner_size,
                     activation=activation,
                     activation_kwargs=activation_kwargs,
                     ff_linear_module_up=ff_linear_module_up,

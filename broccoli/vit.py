@@ -171,7 +171,8 @@ class ViTEncoder(nn.Module):
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
-        transformer_mlp_ratio=2,
+        transformer_ff_ratio=2,
+        transformer_ff_inner_size=None,
         transformer_utility_tokens=0,
         transformer_talking_heads=False,
         transformer_return_utility_tokens=False,
@@ -337,7 +338,8 @@ class ViTEncoder(nn.Module):
                 absolute_position_embedding=transformer_absolute_position_embedding,
                 relative_position_embedding=transformer_relative_position_embedding,
                 source_size=pooling_output_size,
-                mlp_ratio=transformer_mlp_ratio,
+                ff_ratio=transformer_ff_ratio,
+                ff_inner_size=transformer_ff_inner_size,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
                 ff_linear_module_up=transformer_ff_linear_module_up,
@@ -367,8 +369,9 @@ class ViTEncoder(nn.Module):
         if transformer_feedforward_first:
             self.initial_ff = FeedforwardBlock(
                 max(transformer_embedding_size, pooling_out_channels),
-                transformer_mlp_ratio,
                 transformer_embedding_size,
+                ratio=transformer_ff_ratio,
+                inner_size=transformer_ff_inner_size,
                 activation=transformer_activation,
                 activation_kwargs=transformer_activation_kwargs,
                 dropout=(
@@ -483,7 +486,8 @@ class ViT(nn.Module):
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
-        transformer_mlp_ratio=2,
+        transformer_ff_ratio=2,
+        transformer_ff_inner_size=None,
         transformer_utility_tokens=0,
         transformer_talking_heads=False,
         transformer_return_utility_tokens=False,
@@ -503,6 +507,8 @@ class ViT(nn.Module):
         batch_norm_logits=True,
         logit_projection_layer=nn.Linear,
         linear_module=nn.Linear,
+        alpha=1.0,
+        beta=1.0,
     ):
 
         super().__init__()
@@ -523,8 +529,8 @@ class ViT(nn.Module):
                 "SwiGLU": SwiGLU,
             }[transformer_activation]
 
-        self.alpha = (2 * transformer_layers) ** 0.25
-        self.beta = (8 * transformer_layers) ** -0.25
+        self.alpha = alpha
+        self.beta = beta
 
         self.encoder = ViTEncoder(
             input_size=input_size,
@@ -558,7 +564,8 @@ class ViT(nn.Module):
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
             transformer_heads=transformer_heads,
-            transformer_mlp_ratio=transformer_mlp_ratio,
+            transformer_ff_ratio=transformer_ff_ratio,
+            transformer_ff_inner_size=transformer_ff_inner_size,
             transformer_utility_tokens=transformer_utility_tokens,
             transformer_talking_heads=transformer_talking_heads,
             transformer_return_utility_tokens=transformer_return_utility_tokens,
