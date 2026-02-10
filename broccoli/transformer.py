@@ -584,8 +584,8 @@ class EncoderBlock(nn.Module):
         self.ff = FeedforwardBlock(
             d_model,
             d_model,
-            ff_ratio=ff_ratio,
-            ff_inner_size=ff_inner_size,
+            ratio=ff_ratio,
+            inner_size=ff_inner_size,
             activation=activation,
             activation_kwargs=activation_kwargs,
             dropout=ff_dropout,
