@@ -402,14 +402,14 @@ class FeedforwardBlock(nn.Module):
             outer_dropout if outer_dropout is not None else dropout
         )
 
-        self.max_features = (
+        self.inner_size = (
             int(ratio * output_features) if inner_size is None else inner_size
         )
 
         if self.xglu:
-            self.max_features *= 2
+            self.inner_size *= 2
 
-        self.linear_in = linear_module_up(input_features, self.max_features)
+        self.linear_in = linear_module_up(input_features, self.inner_size)
         self.linear_out = linear_module_down(
             int(ratio * output_features), output_features
         )
@@ -418,11 +418,7 @@ class FeedforwardBlock(nn.Module):
             *[
                 self.linear_in,
                 self.activation,
-                (
-                    nn.RMSNorm(int(ratio * output_features))
-                    if normformer
-                    else nn.Identity()
-                ),
+                (nn.RMSNorm(self.inner_size) if normformer else nn.Identity()),
                 self.inner_dropout,
                 self.linear_out,
                 (nn.RMSNorm(output_features) if normformer else nn.Identity()),
