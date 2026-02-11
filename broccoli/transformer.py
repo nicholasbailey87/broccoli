@@ -407,9 +407,11 @@ class FeedforwardBlock(nn.Module):
         )
 
         if self.xglu:
-            self.inner_size *= 2
+            self.max_inner_size = self.inner_size * 2
+        else:
+            self.max_inner_size = self.inner_size
 
-        self.linear_in = linear_module_up(input_features, self.inner_size)
+        self.linear_in = linear_module_up(input_features, self.max_inner_size)
         self.linear_out = linear_module_down(self.inner_size, output_features)
 
         self.process = nn.Sequential(
