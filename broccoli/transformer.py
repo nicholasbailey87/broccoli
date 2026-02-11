@@ -410,9 +410,7 @@ class FeedforwardBlock(nn.Module):
             self.inner_size *= 2
 
         self.linear_in = linear_module_up(input_features, self.inner_size)
-        self.linear_out = linear_module_down(
-            int(ratio * output_features), output_features
-        )
+        self.linear_out = linear_module_down(self.inner_size, output_features)
 
         self.process = nn.Sequential(
             *[
