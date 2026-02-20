@@ -158,6 +158,7 @@ class ViTEncoder(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
+        transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
         transformer_initial_ff_dropout=None,
@@ -196,6 +197,8 @@ class ViTEncoder(nn.Module):
 
         self.alpha = alpha
         self.beta = beta
+
+        self.initial_ff_residual_path = transformer_initial_ff_residual_path
 
         if cnn_activation_kwargs is not None:
             self.cnn_activation = cnn_activation(**cnn_activation_kwargs)
@@ -431,7 +434,10 @@ class ViTEncoder(nn.Module):
     def forward(self, x):
         x = self.preprocess(x)
         if self.initial_ff is not None:
-            x = self.layer_norm(x + self.initial_ff(x))
+            if self.initial_ff_residual_path:
+                x = self.layer_norm(x + self.initial_ff(x))
+            else:
+                x = self.layer_norm(self.initial_ff(x))
         return self.transformer(x)
 
     def attention_logits(self, x):
@@ -473,6 +479,7 @@ class ViT(nn.Module):
         pooling_kernel_stride=2,
         pooling_padding=1,
         transformer_feedforward_first=True,
+        transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
         transformer_initial_ff_dropout=None,
@@ -551,6 +558,7 @@ class ViT(nn.Module):
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
             transformer_feedforward_first=transformer_feedforward_first,
+            transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
             transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
             transformer_initial_ff_linear_module_down=transformer_initial_ff_linear_module_down,
             transformer_initial_ff_dropout=transformer_initial_ff_dropout,
