@@ -409,7 +409,7 @@ class ViTEncoder(nn.Module):
                 checkpoint=transformer_checkpoint_ff,
                 beta=self.beta,
             )
-            self.layer_norm = nn.RMSNorm(transformer_embedding_size)
+            self.norm = nn.RMSNorm(transformer_embedding_size)
         else:
             self.initial_ff = None
 
@@ -433,9 +433,9 @@ class ViTEncoder(nn.Module):
         x = self.preprocess(x)
         if self.initial_ff is not None:
             if self.initial_ff_residual_path:
-                x = self.layer_norm(x + self.initial_ff(x))
+                x = self.norm(x + self.initial_ff(x))
             else:
-                x = self.layer_norm(self.initial_ff(x))
+                x = self.norm(self.initial_ff(x))
         return self.transformer(x)
 
     def attention_logits(self, x):
