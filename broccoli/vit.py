@@ -188,7 +188,6 @@ class ViTEncoder(nn.Module):
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
-        transformer_scale_branch_weights=1.0,
         linear_module=nn.Linear,
         alpha=1.0,
         beta=1.0,
@@ -364,7 +363,6 @@ class ViTEncoder(nn.Module):
                 checkpoint_ff=transformer_checkpoint_ff,
                 alpha=self.alpha,
                 beta=self.beta,
-                scale_branch_weights=transformer_scale_branch_weights,
             )
         else:
             self.transformer = nn.Identity()
@@ -409,7 +407,7 @@ class ViTEncoder(nn.Module):
                 ),
                 normformer=transformer_normformer,
                 checkpoint=transformer_checkpoint_ff,
-                scale_weights=transformer_scale_branch_weights,
+                beta=self.beta,
             )
             self.layer_norm = nn.RMSNorm(transformer_embedding_size)
         else:
@@ -509,7 +507,6 @@ class ViT(nn.Module):
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
-        transformer_scale_branch_weights=1.0,
         head=SequencePoolClassificationHead,
         batch_norm_logits=True,
         logit_projection_layer=nn.Linear,
@@ -588,7 +585,6 @@ class ViT(nn.Module):
             transformer_msa_dropout=transformer_msa_dropout,
             transformer_stochastic_depth=transformer_stochastic_depth,
             transformer_checkpoint_ff=transformer_checkpoint_ff,
-            transformer_scale_branch_weights=transformer_scale_branch_weights,
             linear_module=linear_module,
             alpha=self.alpha,
             beta=self.beta,

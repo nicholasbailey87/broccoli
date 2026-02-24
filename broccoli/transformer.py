@@ -89,7 +89,7 @@ class MHAttention(nn.Module):
         rotary_embedding=None,
         source_size=None,
         scaling="d",
-        scale_v_scale_out=1.0,
+        beta=1.0,
     ):
         """
         Args:
@@ -100,7 +100,7 @@ class MHAttention(nn.Module):
         """
         super().__init__()
 
-        self.scale_v_scale_out = scale_v_scale_out
+        self.beta = beta
 
         if rotary_embedding is not None:
             assert source_size is not None
@@ -352,9 +352,9 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
-        scale_parameters(self.v_proj, self.scale_v_scale_out)
+        scale_parameters(self.v_proj, self.beta)
         self.out_proj.reset_parameters()
-        scale_parameters(self.out_proj, self.scale_v_scale_out)
+        scale_parameters(self.out_proj, self.beta)
 
         if self.talking_heads:
             # Initialize close to identity
@@ -382,13 +382,13 @@ class FeedforwardBlock(nn.Module):
         linear_module_down=nn.Linear,
         normformer=False,
         checkpoint=True,
-        scale_weights=1.0,
+        beta=1.0,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
         self.xglu = activation.__name__.endswith("GLU")
-        self.scale_weights = scale_weights
+        self.beta = beta
 
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
@@ -470,8 +470,8 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(self.linear_in, self.scale_weights)
-        scale_parameters(self.linear_out, self.scale_weights)
+        scale_parameters(self.linear_in, self.beta)
+        scale_parameters(self.linear_out, self.beta)
 
 
 class EncoderBlock(nn.Module):
@@ -506,7 +506,6 @@ class EncoderBlock(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
-        scale_branch_weights=1.0,
     ):
         """
         Args:
@@ -554,13 +553,6 @@ class EncoderBlock(nn.Module):
         else:
             self.rotary_embedding = None
 
-        if self.normformer:
-            mha_internal_beta = scale_branch_weights
-            ff_internal_beta = scale_branch_weights
-        else:
-            mha_internal_beta = beta
-            ff_internal_beta = beta
-
         self.attn = MHAttention(  # Handles QKV projection
             d_model,
             n_heads,
@@ -573,7 +565,7 @@ class EncoderBlock(nn.Module):
             utility_tokens=utility_tokens,
             talking_heads=talking_heads,
             scaling=msa_scaling,
-            scale_v_scale_out=mha_internal_beta,
+            beta=self.beta,
         )
 
         # Submodule for the feedforward process
@@ -599,7 +591,7 @@ class EncoderBlock(nn.Module):
             ),
             normformer=normformer,
             checkpoint=checkpoint_ff,
-            scale_weights=ff_internal_beta,
+            beta=self.beta,
         )
 
         self.reset_parameters()
@@ -622,9 +614,6 @@ class EncoderBlock(nn.Module):
 
         processed = self.drop_path(processed)
 
-        if self.normformer:
-            processed = self.beta * processed
-
         x = self.alpha * x + processed
 
         if self.post_norm:
@@ -636,9 +625,6 @@ class EncoderBlock(nn.Module):
             process_x = x
 
         processed = self.drop_path(self.ff(process_x))
-
-        if self.normformer:
-            processed = self.beta * processed
 
         x = self.alpha * x + processed
 
@@ -714,7 +700,6 @@ class TransformerEncoder(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
-        scale_branch_weights=1.0,
     ):
         """
         Args:
@@ -816,7 +801,6 @@ class TransformerEncoder(nn.Module):
                     checkpoint_ff=checkpoint_ff,
                     alpha=alpha,
                     beta=beta,
-                    scale_branch_weights=scale_branch_weights,
                 )
                 for i in range(n_layers)
             ]
