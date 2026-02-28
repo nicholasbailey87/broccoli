@@ -1,6 +1,6 @@
 import warnings
 import math
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -87,6 +87,7 @@ class MHAttention(nn.Module):
         utility_tokens=0,
         talking_heads=False,
         rotary_embedding=None,
+        positional_heads: Union[int, float] = 0.5,
         source_size=None,
         scaling="d",
         beta=1.0,
@@ -97,8 +98,20 @@ class MHAttention(nn.Module):
                 to mimic the original Attention is All You Need approach of
                 dividing by the sqrt of the embedding Dimension or "d" per
                 "Tensor Programs V...". Default "d"
+            positional_heads: how many heads (or what percentage of heads) should
+                get positional embedding if rotary_embedding is not None. Enforces
+                positional_heads <= n_heads. If positional_heads is an int, that
+                many heads will have positional embedding. Otherwise,
+                floor(positional_heads * n_heads) will have positional embedding.
         """
         super().__init__()
+
+        if isinstance(positional_heads, float):
+            assert positional_heads <= 1.0
+            self.positional_heads = math.floor(positional_heads * n_heads)
+        elif isinstance(positional_heads, int):
+            assert positional_heads <= n_heads
+            self.positional_heads = positional_heads
 
         self.beta = beta
 
@@ -179,6 +192,8 @@ class MHAttention(nn.Module):
         """
         Apply Axial RoPE to all tokens except utility tokens
         """
+        if self.positional_heads == 0.0:
+            return q, k
 
         if len(self.source_size) == 1:
             spatial_dimension_names = "D1"
@@ -204,6 +219,7 @@ class MHAttention(nn.Module):
         q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
         k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
 
+        # We don't apply rotary embeddings to utility tokens
         q_util, q_img = (
             q[:, :, : self.utility_tokens, :],
             q[:, :, self.utility_tokens :, :],
@@ -212,6 +228,18 @@ class MHAttention(nn.Module):
             k[:, :, : self.utility_tokens, :],
             k[:, :, self.utility_tokens :, :],
         )
+
+        # We also only apply RoPE to the first self.positional_heads heads
+        if self.positional_heads != self.n_heads:
+            q_img, q_no_rope = (
+                q_img[:, : self.positional_heads, ...],
+                q_img[:, self.positional_heads :, ...],
+            )
+
+            k_img, k_no_rope = (
+                k_img[:, : self.positional_heads, ...],
+                k_img[:, self.positional_heads :, ...],
+            )
 
         q_img = rearrange(
             q_img,
@@ -239,7 +267,10 @@ class MHAttention(nn.Module):
             f"b h {spatial_dimension_names} d -> b h ({spatial_dimension_names}) d",
         )
 
-        # Re-combine the utility tokens and the RoPE-enhanced sequence tokens
+        # Re-combine all the bits of tensor
+        if self.positional_heads != self.n_heads:
+            q_img = torch.cat([q_img, q_no_rope], dim=1)
+            k_img = torch.cat([k_img, k_no_rope], dim=1)
         q = torch.cat([q_util, q_img], dim=2)
         k = torch.cat([k_util, k_img], dim=2)
 
@@ -421,7 +452,7 @@ class FeedforwardBlock(nn.Module):
                 (nn.RMSNorm(self.inner_size) if normformer else nn.Identity()),
                 self.inner_dropout,
                 self.linear_out,
-                # (nn.RMSNorm(output_features) if normformer else nn.Identity()),
+                (nn.RMSNorm(output_features) if normformer else nn.Identity()),
                 self.outer_dropout,
             ]
         )
@@ -483,6 +514,7 @@ class EncoderBlock(nn.Module):
         d_model,
         n_heads,
         relative_position_embedding=False,
+        positional_heads: Union[int, float] = 0.5,
         source_size=None,
         utility_tokens=0,
         talking_heads=False,
@@ -519,6 +551,9 @@ class EncoderBlock(nn.Module):
 
         if pre_norm and post_norm:
             raise ValueError("A transformer cannot be both prenorm and postnorm.")
+
+        self.n_heads = n_heads
+        self.positional_heads = positional_heads
 
         self.pre_norm = pre_norm
         self.post_norm = post_norm
@@ -561,6 +596,7 @@ class EncoderBlock(nn.Module):
             seq_len=seq_len,
             linear_module=linear_module,
             rotary_embedding=self.rotary_embedding,
+            positional_heads=positional_heads,
             source_size=source_size,
             utility_tokens=utility_tokens,
             talking_heads=talking_heads,
@@ -676,6 +712,7 @@ class TransformerEncoder(nn.Module):
         n_heads,
         absolute_position_embedding=True,
         relative_position_embedding=False,
+        positional_heads: Union[int, float] = 0.5,
         source_size=None,
         ff_ratio=4,
         ff_inner_size=None,
@@ -778,6 +815,7 @@ class TransformerEncoder(nn.Module):
                     d_model,
                     n_heads,
                     relative_position_embedding=relative_position_embedding,
+                    positional_heads=positional_heads,
                     source_size=source_size,
                     utility_tokens=utility_tokens,
                     talking_heads=talking_heads,

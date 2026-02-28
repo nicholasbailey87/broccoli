@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Union
 
 from .transformer import TransformerEncoder, FeedforwardBlock
 from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
@@ -169,6 +169,7 @@ class ViTEncoder(nn.Module):
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
         transformer_relative_position_embedding=True,
+        transformer_positional_heads: Union[int, float] = 0.5,
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
@@ -192,6 +193,15 @@ class ViTEncoder(nn.Module):
         alpha=1.0,
         beta=1.0,
     ):
+        """
+        Args:
+            transformer_positional_heads: how many heads (or what percentage of heads)
+                should get positional embedding if rotary_embedding is not None.
+                Enforces positional_heads <= n_heads. If positional_heads is an int,
+                that many heads will have positional embedding. Otherwise,
+                floor(positional_heads * n_heads) will have positional embedding.
+        """
+
         super().__init__()
 
         self.alpha = alpha
@@ -339,6 +349,7 @@ class ViTEncoder(nn.Module):
                 transformer_heads,
                 absolute_position_embedding=transformer_absolute_position_embedding,
                 relative_position_embedding=transformer_relative_position_embedding,
+                positional_heads=transformer_positional_heads,
                 source_size=pooling_output_size,
                 ff_ratio=transformer_ff_ratio,
                 ff_inner_size=transformer_ff_inner_size,
@@ -453,7 +464,12 @@ class ViTEncoder(nn.Module):
 
 class ViT(nn.Module):
     """
-    ...
+    Args:
+        transformer_positional_heads: how many heads (or what percentage of heads)
+            should get positional embedding if rotary_embedding is not None.
+            Enforces positional_heads <= n_heads. If positional_heads is an int,
+            that many heads will have positional embedding. Otherwise,
+            floor(positional_heads * n_heads) will have positional embedding.
     """
 
     def __init__(
@@ -488,6 +504,7 @@ class ViT(nn.Module):
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
         transformer_relative_position_embedding=True,
+        transformer_positional_heads: Union[int, float] = 0.5,
         transformer_embedding_size=256,
         transformer_layers=7,
         transformer_heads=4,
@@ -566,6 +583,7 @@ class ViT(nn.Module):
             transformer_post_norm=transformer_post_norm,
             transformer_absolute_position_embedding=transformer_absolute_position_embedding,
             transformer_relative_position_embedding=transformer_relative_position_embedding,
+            transformer_positional_heads=transformer_positional_heads,
             transformer_embedding_size=transformer_embedding_size,
             transformer_layers=transformer_layers,
             transformer_heads=transformer_heads,
