@@ -411,7 +411,6 @@ class FeedforwardBlock(nn.Module):
         outer_dropout=None,
         linear_module_up=nn.Linear,
         linear_module_down=nn.Linear,
-        normformer=False,
         checkpoint=True,
         beta=1.0,
     ):
@@ -449,10 +448,10 @@ class FeedforwardBlock(nn.Module):
             *[
                 self.linear_in,
                 self.activation,
-                (nn.RMSNorm(self.inner_size) if normformer else nn.Identity()),
+                nn.RMSNorm(self.inner_size),
                 self.inner_dropout,
                 self.linear_out,
-                # (nn.RMSNorm(output_features) if normformer else nn.Identity()),
+                nn.RMSNorm(output_features),
                 self.outer_dropout,
             ]
         )
@@ -534,7 +533,6 @@ class EncoderBlock(nn.Module):
         linear_module=nn.Linear,
         pre_norm=False,
         post_norm=True,
-        normformer=True,
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
@@ -557,7 +555,6 @@ class EncoderBlock(nn.Module):
 
         self.pre_norm = pre_norm
         self.post_norm = post_norm
-        self.normformer = normformer
 
         self.alpha = alpha
         self.beta = beta
@@ -567,9 +564,6 @@ class EncoderBlock(nn.Module):
         if self.pre_norm:
             self.pre_attention_norm = nn.RMSNorm(d_model)
             self.pre_mlp_norm = nn.RMSNorm(d_model)
-
-        if normformer:
-            self.normformer_norm = nn.RMSNorm(d_model)
 
         if self.post_norm:
             self.input_norm = nn.RMSNorm(d_model)
@@ -625,7 +619,6 @@ class EncoderBlock(nn.Module):
                 if ff_linear_module_down is not None
                 else linear_module
             ),
-            normformer=normformer,
             checkpoint=checkpoint_ff,
             beta=self.beta,
         )
@@ -644,9 +637,6 @@ class EncoderBlock(nn.Module):
             process_x = x
 
         processed = self.attn(process_x, process_x, process_x)
-
-        if self.normformer:
-            processed = self.normformer_norm(processed)
 
         processed = self.drop_path(processed)
 
@@ -691,9 +681,6 @@ class EncoderBlock(nn.Module):
             self.post_attention_norm.reset_parameters()
             self.post_mlp_norm.reset_parameters()
 
-        if self.normformer:
-            self.normformer_norm.reset_parameters()
-
         self.attn.reset_parameters()
         self.ff.reset_parameters()
 
@@ -732,7 +719,6 @@ class TransformerEncoder(nn.Module):
         return_utility_tokens=False,
         pre_norm=True,
         post_norm=False,
-        normformer=False,
         msa_scaling="d",
         checkpoint_ff=True,
         alpha=1.0,
@@ -835,7 +821,6 @@ class TransformerEncoder(nn.Module):
                     linear_module=linear_module,
                     pre_norm=pre_norm,
                     post_norm=post_norm,
-                    normformer=normformer,
                     checkpoint_ff=checkpoint_ff,
                     alpha=alpha,
                     beta=beta,

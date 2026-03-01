@@ -165,7 +165,6 @@ class ViTEncoder(nn.Module):
         transformer_initial_ff_inner_dropout=None,
         transformer_initial_ff_outer_dropout=None,
         transformer_pre_norm=True,
-        transformer_normformer=False,
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
         transformer_relative_position_embedding=True,
@@ -369,7 +368,6 @@ class ViTEncoder(nn.Module):
                 talking_heads=transformer_talking_heads,
                 return_utility_tokens=transformer_return_utility_tokens,
                 pre_norm=transformer_pre_norm,
-                normformer=transformer_normformer,
                 post_norm=transformer_post_norm,
                 checkpoint_ff=transformer_checkpoint_ff,
                 alpha=self.alpha,
@@ -416,7 +414,6 @@ class ViTEncoder(nn.Module):
                     or transformer_ff_linear_module_down
                     or linear_module
                 ),
-                normformer=transformer_normformer,
                 checkpoint=transformer_checkpoint_ff,
                 beta=self.beta,
             )
@@ -500,7 +497,6 @@ class ViT(nn.Module):
         transformer_initial_ff_inner_dropout=None,
         transformer_initial_ff_outer_dropout=None,
         transformer_pre_norm=True,
-        transformer_normformer=False,
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
         transformer_relative_position_embedding=True,
@@ -579,7 +575,6 @@ class ViT(nn.Module):
             transformer_initial_ff_inner_dropout=transformer_initial_ff_inner_dropout,
             transformer_initial_ff_outer_dropout=transformer_initial_ff_outer_dropout,
             transformer_pre_norm=transformer_pre_norm,
-            transformer_normformer=transformer_normformer,
             transformer_post_norm=transformer_post_norm,
             transformer_absolute_position_embedding=transformer_absolute_position_embedding,
             transformer_relative_position_embedding=transformer_relative_position_embedding,
