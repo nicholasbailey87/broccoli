@@ -536,6 +536,7 @@ class EncoderBlock(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
+        norm_ff_output=True,
     ):
         """
         Args:
@@ -559,6 +560,8 @@ class EncoderBlock(nn.Module):
         self.alpha = alpha
         self.beta = beta
 
+        self.norm_ff_output = norm_ff_output
+
         self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
         if self.pre_norm:
@@ -566,7 +569,6 @@ class EncoderBlock(nn.Module):
             self.pre_mlp_norm = nn.RMSNorm(d_model)
 
         if self.post_norm:
-            self.input_norm = nn.RMSNorm(d_model)
             self.post_attention_norm = nn.RMSNorm(d_model)
             self.post_mlp_norm = nn.RMSNorm(d_model)
 
@@ -620,7 +622,7 @@ class EncoderBlock(nn.Module):
                 else linear_module
             ),
             checkpoint=checkpoint_ff,
-            beta=self.beta,
+            beta=1 if self.norm_ff_output else self.beta,
         )
 
         self.reset_parameters()
@@ -650,7 +652,10 @@ class EncoderBlock(nn.Module):
         else:
             process_x = x
 
-        processed = self.drop_path(self.ff(process_x))
+        if self.norm_ff_output:
+            processed = self.beta * self.drop_path(self.ff(process_x))
+        else:
+            processed = self.drop_path(self.ff(process_x))
 
         x = self.alpha * x + processed
 
@@ -667,8 +672,6 @@ class EncoderBlock(nn.Module):
         """
         if self.pre_norm:
             x = self.pre_attention_norm(x)
-        elif self.post_norm:
-            x = self.input_norm(x)
 
         return self.attn.attention_logits(x, x, x)
 
@@ -723,6 +726,7 @@ class TransformerEncoder(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
+        norm_ff_output=True,
     ):
         """
         Args:
@@ -754,6 +758,7 @@ class TransformerEncoder(nn.Module):
 
         self.seq_len = seq_len
         self.n_heads = n_heads
+        self.n_layers = n_layers
         self._utility_tokens = utility_tokens
         self.return_utility_tokens = return_utility_tokens
 
@@ -824,6 +829,7 @@ class TransformerEncoder(nn.Module):
                     checkpoint_ff=checkpoint_ff,
                     alpha=alpha,
                     beta=beta,
+                    norm_ff_output=norm_ff_output,
                 )
                 for i in range(n_layers)
             ]
