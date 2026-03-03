@@ -188,7 +188,7 @@ class ViTEncoder(nn.Module):
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
-        norm_ff_output=True,
+        transformer_norm_ff_output=True,
         linear_module=nn.Linear,
         alpha=1.0,
         beta=1.0,
@@ -373,7 +373,7 @@ class ViTEncoder(nn.Module):
                 checkpoint_ff=transformer_checkpoint_ff,
                 alpha=self.alpha,
                 beta=self.beta,
-                norm_ff_output=norm_ff_output,
+                norm_ff_output=transformer_norm_ff_output,
             )
         else:
             self.transformer = nn.Identity()
