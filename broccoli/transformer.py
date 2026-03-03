@@ -642,7 +642,10 @@ class EncoderBlock(nn.Module):
 
         processed = self.drop_path(processed)
 
-        x = self.alpha * x + processed
+        if self.post_norm:
+            x = self.alpha * x
+
+        x = x + processed
 
         if self.post_norm:
             x = self.post_attention_norm(x)
@@ -657,7 +660,10 @@ class EncoderBlock(nn.Module):
         else:
             processed = self.drop_path(self.ff(process_x))
 
-        x = self.alpha * x + processed
+        if self.post_norm:
+            x = self.alpha * x
+
+        x = x + processed
 
         if self.post_norm:
             x = self.post_mlp_norm(x)
