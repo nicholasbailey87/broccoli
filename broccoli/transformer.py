@@ -108,7 +108,7 @@ class MHAttention(nn.Module):
 
         if isinstance(positional_heads, float):
             assert positional_heads <= 1.0
-            self.positional_heads = math.floor(positional_heads * n_heads)
+            self.positional_heads = math.ceil(positional_heads * n_heads)
         elif isinstance(positional_heads, int):
             assert positional_heads <= n_heads
             self.positional_heads = positional_heads
@@ -413,12 +413,14 @@ class FeedforwardBlock(nn.Module):
         linear_module_down=nn.Linear,
         checkpoint=True,
         beta=1.0,
+        norm_output=True,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
         self.xglu = activation.__name__.endswith("GLU")
         self.beta = beta
+        self.norm_output = norm_output
 
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
@@ -451,7 +453,7 @@ class FeedforwardBlock(nn.Module):
                 nn.RMSNorm(self.inner_size),
                 self.inner_dropout,
                 self.linear_out,
-                nn.RMSNorm(output_features),
+                (nn.RMSNorm(output_features) if self.norm_output else nn.Identity()),
                 self.outer_dropout,
             ]
         )
@@ -623,6 +625,7 @@ class EncoderBlock(nn.Module):
             ),
             checkpoint=checkpoint_ff,
             beta=1 if self.norm_ff_output else self.beta,
+            norm_output=norm_ff_output,
         )
 
         self.reset_parameters()
@@ -643,30 +646,21 @@ class EncoderBlock(nn.Module):
         processed = self.drop_path(processed)
 
         if self.post_norm:
-            x = self.alpha * x
-
-        x = x + processed
-
-        if self.post_norm:
-            x = self.post_attention_norm(x)
+            x = self.post_attention_norm(self.alpha * x + processed)
             process_x = x
         elif self.pre_norm:
+            x = x + processed
             process_x = self.pre_mlp_norm(x)
         else:
             process_x = x
 
         if self.norm_ff_output:
-            processed = self.beta * self.drop_path(self.ff(process_x))
+            processed = self.drop_path(self.beta * self.ff(process_x))
         else:
             processed = self.drop_path(self.ff(process_x))
 
         if self.post_norm:
-            x = self.alpha * x
-
-        x = x + processed
-
-        if self.post_norm:
-            x = self.post_mlp_norm(x)
+            x = self.post_mlp_norm(self.alpha * x + processed)
 
         return x
 
