@@ -164,6 +164,7 @@ class ViTEncoder(nn.Module):
         transformer_initial_ff_dropout=None,
         transformer_initial_ff_inner_dropout=None,
         transformer_initial_ff_outer_dropout=None,
+        transformer_ff_block_weight_scaling=1.0,
         transformer_pre_norm=True,
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
@@ -206,8 +207,10 @@ class ViTEncoder(nn.Module):
 
         self.alpha = alpha
         self.beta = beta
+        self.transformer_ff_block_weight_scaling = transformer_ff_block_weight_scaling
 
         self.initial_ff_residual_path = transformer_initial_ff_residual_path
+        self.transformer_post_norm = transformer_post_norm
 
         if cnn_activation_kwargs is not None:
             self.cnn_activation = cnn_activation(**cnn_activation_kwargs)
@@ -361,6 +364,7 @@ class ViTEncoder(nn.Module):
                 ff_dropout=transformer_ff_dropout,
                 ff_inner_dropout=transformer_ff_inner_dropout,
                 ff_outer_dropout=transformer_ff_outer_dropout,
+                ff_block_weight_scaling=transformer_ff_block_weight_scaling,
                 msa_dropout=transformer_msa_dropout,
                 stochastic_depth=transformer_stochastic_depth,
                 causal=False,
@@ -417,7 +421,12 @@ class ViTEncoder(nn.Module):
                     or linear_module
                 ),
                 checkpoint=transformer_checkpoint_ff,
-                beta=self.beta,
+                beta=(
+                    self.transformer_ff_block_weight_scaling
+                    if transformer_norm_ff_output or transformer_pre_norm
+                    else self.beta * self.transformer_ff_block_weight_scaling
+                ),
+                norm_output=transformer_norm_ff_output,
             )
             self.norm = nn.RMSNorm(transformer_embedding_size)
         else:
@@ -443,9 +452,15 @@ class ViTEncoder(nn.Module):
         x = self.preprocess(x)
         if self.initial_ff is not None:
             if self.initial_ff_residual_path:
-                x = self.norm(x + self.initial_ff(x))
+                if self.transformer_post_norm:
+                    x = self.norm(self.alpha * x + self.beta * self.initial_ff(x))
+                else:
+                    x = x + self.initial_ff(x)
             else:
-                x = self.norm(self.initial_ff(x))
+                if self.transformer_post_norm:
+                    x = self.norm(self.initial_ff(x))
+                else:
+                    x = self.initial_ff(x)
         return self.transformer(x)
 
     def attention_logits(self, x):
@@ -519,6 +534,7 @@ class ViT(nn.Module):
         transformer_ff_dropout=0.0,
         transformer_ff_inner_dropout=0.0,
         transformer_ff_outer_dropout=0.0,
+        transformer_ff_block_weight_scaling=1.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
@@ -577,6 +593,7 @@ class ViT(nn.Module):
             transformer_initial_ff_dropout=transformer_initial_ff_dropout,
             transformer_initial_ff_inner_dropout=transformer_initial_ff_inner_dropout,
             transformer_initial_ff_outer_dropout=transformer_initial_ff_outer_dropout,
+            transformer_ff_block_weight_scaling=transformer_ff_block_weight_scaling,
             transformer_pre_norm=transformer_pre_norm,
             transformer_post_norm=transformer_post_norm,
             transformer_absolute_position_embedding=transformer_absolute_position_embedding,

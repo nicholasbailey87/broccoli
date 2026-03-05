@@ -529,6 +529,7 @@ class EncoderBlock(nn.Module):
         ff_dropout=0.0,
         ff_inner_dropout=0.0,
         ff_outer_dropout=0.0,
+        ff_block_weight_scaling=1.0,
         msa_dropout=0.0,
         identity_probability=0.0,
         causal=False,
@@ -561,6 +562,7 @@ class EncoderBlock(nn.Module):
 
         self.alpha = alpha
         self.beta = beta
+        self.ff_block_weight_scaling = ff_block_weight_scaling
 
         self.norm_ff_output = norm_ff_output
 
@@ -624,7 +626,11 @@ class EncoderBlock(nn.Module):
                 else linear_module
             ),
             checkpoint=checkpoint_ff,
-            beta=1 if self.norm_ff_output else self.beta,
+            beta=(
+                self.ff_block_weight_scaling
+                if self.norm_ff_output
+                else self.ff_block_weight_scaling * self.beta
+            ),
             norm_output=norm_ff_output,
         )
 
@@ -713,6 +719,7 @@ class TransformerEncoder(nn.Module):
         ff_dropout=0.0,
         ff_inner_dropout=0.0,
         ff_outer_dropout=0.0,
+        ff_block_weight_scaling=1.0,
         msa_dropout=0.0,
         stochastic_depth=0.0,
         causal=False,
@@ -761,6 +768,9 @@ class TransformerEncoder(nn.Module):
         self.n_layers = n_layers
         self._utility_tokens = utility_tokens
         self.return_utility_tokens = return_utility_tokens
+        self.alpha = alpha
+        self.beta = beta
+        self.ff_block_weight_scaling = ff_block_weight_scaling
 
         # Initialise utility tokens with normal init, like usual Pytorch embeddings
         if self._utility_tokens:
@@ -820,6 +830,7 @@ class TransformerEncoder(nn.Module):
                     ff_dropout=ff_dropout,
                     ff_inner_dropout=ff_inner_dropout,
                     ff_outer_dropout=ff_outer_dropout,
+                    ff_block_weight_scaling=ff_block_weight_scaling,
                     msa_dropout=msa_dropout,
                     identity_probability=self.stochastic_depth_probabilities[i],
                     causal=causal,
