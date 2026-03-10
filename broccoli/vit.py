@@ -622,6 +622,7 @@ class ViT(nn.Module):
             image_classes,
             logit_projection_layer=logit_projection_layer,
             batch_norm_logits=batch_norm_logits,
+            linear_module=classification_head_linear_module,
         )
 
         self.reset_parameters()
