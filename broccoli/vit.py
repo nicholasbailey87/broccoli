@@ -164,7 +164,6 @@ class ViTEncoder(nn.Module):
         transformer_initial_ff_dropout=None,
         transformer_initial_ff_inner_dropout=None,
         transformer_initial_ff_outer_dropout=None,
-        transformer_ff_block_weight_scaling=1.0,
         transformer_pre_norm=True,
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
@@ -207,7 +206,6 @@ class ViTEncoder(nn.Module):
 
         self.alpha = alpha
         self.beta = beta
-        self.transformer_ff_block_weight_scaling = transformer_ff_block_weight_scaling
 
         self.initial_ff_residual_path = transformer_initial_ff_residual_path
         self.transformer_post_norm = transformer_post_norm
@@ -364,7 +362,6 @@ class ViTEncoder(nn.Module):
                 ff_dropout=transformer_ff_dropout,
                 ff_inner_dropout=transformer_ff_inner_dropout,
                 ff_outer_dropout=transformer_ff_outer_dropout,
-                ff_block_weight_scaling=transformer_ff_block_weight_scaling,
                 msa_dropout=transformer_msa_dropout,
                 stochastic_depth=transformer_stochastic_depth,
                 causal=False,
@@ -421,11 +418,7 @@ class ViTEncoder(nn.Module):
                     or linear_module
                 ),
                 checkpoint=transformer_checkpoint_ff,
-                beta=(
-                    self.transformer_ff_block_weight_scaling
-                    if transformer_norm_ff_output or transformer_pre_norm
-                    else self.beta * self.transformer_ff_block_weight_scaling
-                ),
+                beta=self.beta,
                 norm_output=transformer_norm_ff_output,
             )
             self.norm = nn.RMSNorm(transformer_embedding_size)
@@ -534,7 +527,6 @@ class ViT(nn.Module):
         transformer_ff_dropout=0.0,
         transformer_ff_inner_dropout=0.0,
         transformer_ff_outer_dropout=0.0,
-        transformer_ff_block_weight_scaling=1.0,
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         transformer_checkpoint_ff=True,
@@ -543,6 +535,7 @@ class ViT(nn.Module):
         batch_norm_logits=True,
         logit_projection_layer=nn.Linear,
         linear_module=nn.Linear,
+        classification_head_linear_module=nn.Linear,
         alpha=1.0,
         beta=1.0,
     ):
@@ -593,7 +586,6 @@ class ViT(nn.Module):
             transformer_initial_ff_dropout=transformer_initial_ff_dropout,
             transformer_initial_ff_inner_dropout=transformer_initial_ff_inner_dropout,
             transformer_initial_ff_outer_dropout=transformer_initial_ff_outer_dropout,
-            transformer_ff_block_weight_scaling=transformer_ff_block_weight_scaling,
             transformer_pre_norm=transformer_pre_norm,
             transformer_post_norm=transformer_post_norm,
             transformer_absolute_position_embedding=transformer_absolute_position_embedding,
@@ -620,6 +612,7 @@ class ViT(nn.Module):
             transformer_checkpoint_ff=transformer_checkpoint_ff,
             transformer_norm_ff_output=transformer_norm_ff_output,
             linear_module=linear_module,
+            classification_head_linear_module=classification_head_linear_module,
             alpha=self.alpha,
             beta=self.beta,
         )
