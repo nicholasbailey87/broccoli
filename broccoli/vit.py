@@ -612,7 +612,6 @@ class ViT(nn.Module):
             transformer_checkpoint_ff=transformer_checkpoint_ff,
             transformer_norm_ff_output=transformer_norm_ff_output,
             linear_module=linear_module,
-            classification_head_linear_module=classification_head_linear_module,
             alpha=self.alpha,
             beta=self.beta,
         )
