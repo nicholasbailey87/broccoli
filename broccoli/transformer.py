@@ -412,13 +412,11 @@ class FeedforwardBlock(nn.Module):
         linear_module_up=nn.Linear,
         linear_module_down=nn.Linear,
         checkpoint=True,
-        norm_output=True,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
         self.xglu = activation.__name__.endswith("GLU")
-        self.norm_output = norm_output
 
         if activation_kwargs is not None:
             self.activation = activation(**activation_kwargs)
@@ -451,7 +449,7 @@ class FeedforwardBlock(nn.Module):
                 nn.RMSNorm(self.inner_size),
                 self.inner_dropout,
                 self.linear_out,
-                (nn.RMSNorm(output_features) if self.norm_output else nn.Identity()),
+                nn.RMSNorm(output_features),
                 self.outer_dropout,
             ]
         )
@@ -533,7 +531,6 @@ class EncoderBlock(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
-        norm_ff_output=True,
     ):
         """
         Args:
@@ -556,8 +553,6 @@ class EncoderBlock(nn.Module):
 
         self.alpha = alpha
         self.beta = beta
-
-        self.norm_ff_output = norm_ff_output
 
         self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
@@ -619,7 +614,6 @@ class EncoderBlock(nn.Module):
                 else linear_module
             ),
             checkpoint=checkpoint_ff,
-            norm_output=norm_ff_output,
         )
 
         self.reset_parameters()
@@ -648,10 +642,7 @@ class EncoderBlock(nn.Module):
         else:
             process_x = x
 
-        if self.norm_ff_output:
-            processed = self.drop_path(self.beta * self.ff(process_x))
-        else:
-            processed = self.drop_path(self.ff(process_x))
+        processed = self.drop_path(self.beta * self.ff(process_x))
 
         if self.post_norm:
             x = self.post_mlp_norm(self.alpha * x + processed)
@@ -720,7 +711,6 @@ class TransformerEncoder(nn.Module):
         checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
-        norm_ff_output=True,
     ):
         """
         Args:
@@ -825,7 +815,6 @@ class TransformerEncoder(nn.Module):
                     checkpoint_ff=checkpoint_ff,
                     alpha=alpha,
                     beta=beta,
-                    norm_ff_output=norm_ff_output,
                 )
                 for i in range(n_layers)
             ]
