@@ -412,14 +412,12 @@ class FeedforwardBlock(nn.Module):
         linear_module_up=nn.Linear,
         linear_module_down=nn.Linear,
         checkpoint=True,
-        beta=1.0,
         norm_output=True,
     ):
         super().__init__()
 
         self.checkpoint = checkpoint
         self.xglu = activation.__name__.endswith("GLU")
-        self.beta = beta
         self.norm_output = norm_output
 
         if activation_kwargs is not None:
@@ -502,9 +500,6 @@ class FeedforwardBlock(nn.Module):
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
 
-        scale_parameters(self.linear_in, self.beta)
-        scale_parameters(self.linear_out, self.beta)
-
 
 class EncoderBlock(nn.Module):
     """ """
@@ -575,7 +570,7 @@ class EncoderBlock(nn.Module):
             self.post_mlp_norm = nn.RMSNorm(d_model)
 
         if relative_position_embedding:
-            max_freq = int(max(source_size) / 2)  # Suggested by Gemini!
+            max_freq = int(max(source_size) / 2)
             if d_model < 16:
                 dim = d_model
             else:
@@ -624,7 +619,6 @@ class EncoderBlock(nn.Module):
                 else linear_module
             ),
             checkpoint=checkpoint_ff,
-            beta=self.beta,
             norm_output=norm_ff_output,
         )
 
