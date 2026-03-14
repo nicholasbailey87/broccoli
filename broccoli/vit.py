@@ -416,7 +416,6 @@ class ViTEncoder(nn.Module):
                     or linear_module
                 ),
                 checkpoint=transformer_checkpoint_ff,
-                beta=self.beta,
             )
             self.norm = nn.RMSNorm(transformer_embedding_size)
         else:
