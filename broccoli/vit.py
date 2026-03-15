@@ -555,6 +555,19 @@ class ViT(nn.Module):
         self.alpha = alpha
         self.beta = beta
 
+        self.transformer_embedding_size = transformer_embedding_size
+
+        if transformer_ff_ratio is not None:
+            self.transformer_ff_ratio = transformer_ff_ratio
+            self.transformer_ff_inner_size = int(
+                transformer_ff_ratio * transformer_embedding_size
+            )
+        else:
+            self.transformer_ff_ratio = (
+                transformer_ff_inner_size / transformer_embedding_size
+            )
+            self.transformer_ff_inner_size = transformer_ff_inner_size
+
         self.encoder = ViTEncoder(
             input_size=input_size,
             initial_batch_norm=initial_batch_norm,
