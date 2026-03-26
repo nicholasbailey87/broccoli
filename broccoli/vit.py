@@ -437,7 +437,11 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.adapter,
-                nn.RMSNorm(transformer_embedding_size),
+                (
+                    nn.RMSNorm(transformer_embedding_size)
+                    if not transformer_feedforward_first
+                    else nn.Identity()
+                ),
             ]
         )
 
