@@ -335,9 +335,15 @@ class ViTEncoder(nn.Module):
                 "Pooling type must be max, average, concat or None"
             )
 
-        self.pooling_channels_padding = PadTensor(
-            (0, max(0, transformer_embedding_size - pooling_out_channels))
-        )
+        # TODO: use linear projection in the case of ViT, but nothing in the case of CCT or ViT 2
+        if (
+            pooling_out_channels != transformer_embedding_size
+        ) and not transformer_feedforward_first:
+            self.adapter = linear_module(
+                pooling_out_channels, transformer_embedding_size, bias=False
+            )
+        else:
+            self.adapter = nn.Identity()
 
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
@@ -379,7 +385,7 @@ class ViTEncoder(nn.Module):
 
         if transformer_feedforward_first:
             self.initial_ff = FeedforwardBlock(
-                max(transformer_embedding_size, pooling_out_channels),
+                pooling_out_channels,
                 transformer_embedding_size,
                 ratio=transformer_ff_ratio,
                 inner_size=transformer_ff_inner_size,
@@ -430,7 +436,7 @@ class ViTEncoder(nn.Module):
                 Rearrange(  # for transformer
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
-                self.pooling_channels_padding,
+                self.adapter,
                 nn.RMSNorm(transformer_embedding_size),
             ]
         )
