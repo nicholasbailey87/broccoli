@@ -335,15 +335,9 @@ class ViTEncoder(nn.Module):
                 "Pooling type must be max, average, concat or None"
             )
 
-        # TODO: use linear projection in the case of ViT, but nothing in the case of CCT or ViT 2
-        if (
-            pooling_out_channels != transformer_embedding_size
-        ) and not transformer_feedforward_first:
-            self.adapter = linear_module(
-                pooling_out_channels, transformer_embedding_size, bias=False
-            )
-        else:
-            self.adapter = nn.Identity()
+        self.pooling_channels_padding = PadTensor(
+            (0, max(0, transformer_embedding_size - pooling_out_channels))
+        )
 
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
@@ -385,7 +379,7 @@ class ViTEncoder(nn.Module):
 
         if transformer_feedforward_first:
             self.initial_ff = FeedforwardBlock(
-                pooling_out_channels,
+                max(transformer_embedding_size, pooling_out_channels),
                 transformer_embedding_size,
                 ratio=transformer_ff_ratio,
                 inner_size=transformer_ff_inner_size,
@@ -436,12 +430,8 @@ class ViTEncoder(nn.Module):
                 Rearrange(  # for transformer
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
-                self.adapter,
-                (
-                    nn.RMSNorm(transformer_embedding_size)
-                    if not transformer_feedforward_first
-                    else nn.Identity()
-                ),
+                self.pooling_channels_padding,
+                nn.RMSNorm(transformer_embedding_size),
             ]
         )
 
@@ -564,6 +554,19 @@ class ViT(nn.Module):
 
         self.alpha = alpha
         self.beta = beta
+
+        self.transformer_embedding_size = transformer_embedding_size
+
+        if transformer_ff_ratio is not None:
+            self.transformer_ff_ratio = transformer_ff_ratio
+            self.transformer_ff_inner_size = int(
+                transformer_ff_ratio * transformer_embedding_size
+            )
+        else:
+            self.transformer_ff_ratio = (
+                transformer_ff_inner_size / transformer_embedding_size
+            )
+            self.transformer_ff_inner_size = transformer_ff_inner_size
 
         self.encoder = ViTEncoder(
             input_size=input_size,
