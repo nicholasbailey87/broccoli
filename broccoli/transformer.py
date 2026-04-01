@@ -14,10 +14,21 @@ from .rope import RotaryEmbedding, apply_rotary_emb
 try:
     from flash_attn import flash_attn_func
 
-    print("Using flash-attn.")
-    FLASH_ATTN = True
+    # Flash Attention requires Ampere (SM80) or newer
+    if torch.cuda.is_available():
+        major, _ = torch.cuda.get_device_capability()
+        if major >= 8:
+            print("Using flash-attn.")
+            FLASH_ATTN = True
+        else:
+            print(
+                f"flash-attn installed but GPU compute capability is {major}.x "
+                f"(need >= 8.0). Falling back to standard attention."
+            )
+            FLASH_ATTN = False
+    else:
+        FLASH_ATTN = False
 except ImportError:
-    pass
     FLASH_ATTN = False
 
 
