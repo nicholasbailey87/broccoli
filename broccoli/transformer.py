@@ -95,7 +95,7 @@ class MHAttention(nn.Module):
         causal=False,
         seq_len=None,
         linear_module: nn.Module = nn.Linear,
-        utility_tokens=0,
+        bos_tokens=0,
         knocking_heads=False,
         rotary_embedding=None,
         positional_heads: Union[int, float] = 0.25,
@@ -133,25 +133,6 @@ class MHAttention(nn.Module):
 
         self.knocking_heads = knocking_heads
 
-        if self.knocking_heads:
-            if self.positional_heads < self.n_heads:
-                self.value_projection_pos = nn.Linear(
-                    self.positional_heads, self.positional_heads, bias=False
-                )
-                self.value_projection_non_pos = nn.Linear(
-                    n_heads - self.positional_heads,
-                    n_heads - self.positional_heads,
-                    bias=False,
-                )
-                nn.init.eye_(self.value_projection_pos.weight)
-            else:
-                self.value_projection_pos = None
-                self.value_projection_non_pos = nn.Linear(n_heads, n_heads, bias=False)
-            nn.init.eye_(self.value_projection_non_pos.weight)
-        else:
-            self.value_projection_pos = None
-            self.value_projection_non_pos = None
-
         self.embed_dim = embed_dim
         self.n_heads = n_heads
         assert embed_dim % n_heads == 0
@@ -186,7 +167,26 @@ class MHAttention(nn.Module):
             )
         self.rotary_embedding = rotary_embedding
         self.source_size = source_size
-        self.utility_tokens = utility_tokens
+        self.bos_tokens = bos_tokens
+
+        if self.knocking_heads:
+            if self.positional_heads < self.n_heads:
+                self.value_projection_pos = nn.Linear(
+                    self.positional_heads, self.positional_heads, bias=False
+                )
+                self.value_projection_non_pos = nn.Linear(
+                    n_heads - self.positional_heads,
+                    n_heads - self.positional_heads,
+                    bias=False,
+                )
+                nn.init.eye_(self.value_projection_pos.weight)
+            else:
+                self.value_projection_pos = None
+                self.value_projection_non_pos = nn.Linear(n_heads, n_heads, bias=False)
+            nn.init.eye_(self.value_projection_non_pos.weight)
+        else:
+            self.value_projection_pos = None
+            self.value_projection_non_pos = None
 
         self.reset_parameters()
 
@@ -244,12 +244,12 @@ class MHAttention(nn.Module):
 
         # We don't apply rotary embeddings to utility tokens
         q_util, q_img = (
-            q[:, :, : self.utility_tokens, :],
-            q[:, :, self.utility_tokens :, :],
+            q[:, :, : self.bos_tokens, :],
+            q[:, :, self.bos_tokens :, :],
         )
         k_util, k_img = (
-            k[:, :, : self.utility_tokens, :],
-            k[:, :, self.utility_tokens :, :],
+            k[:, :, : self.bos_tokens, :],
+            k[:, :, self.bos_tokens :, :],
         )
 
         # We also only apply RoPE to the first self.positional_heads heads
@@ -537,7 +537,7 @@ class EncoderBlock(nn.Module):
         relative_position_embedding=False,
         positional_heads: Union[int, float] = 0.5,
         source_size=None,
-        utility_tokens=0,
+        bos_tokens=0,
         knocking_heads=False,
         ff_ratio=4,
         ff_inner_size=None,
@@ -613,7 +613,7 @@ class EncoderBlock(nn.Module):
             rotary_embedding=self.rotary_embedding,
             positional_heads=positional_heads,
             source_size=source_size,
-            utility_tokens=utility_tokens,
+            bos_tokens=bos_tokens,
             knocking_heads=knocking_heads,
             scaling=msa_scaling,
             beta=self.beta,
@@ -729,9 +729,9 @@ class TransformerEncoder(nn.Module):
         stochastic_depth=0.0,
         causal=False,
         linear_module=nn.Linear,
-        utility_tokens=0,
+        bos_tokens=0,
         knocking_heads=False,
-        return_utility_tokens=False,
+        return_bos_tokens=False,
         pre_norm=True,
         post_norm=False,
         msa_scaling="d",
@@ -764,22 +764,22 @@ class TransformerEncoder(nn.Module):
         self.seq_len = seq_len
         self.n_heads = n_heads
         self.n_layers = n_layers
-        self._utility_tokens = utility_tokens
-        self.return_utility_tokens = return_utility_tokens
+        self._bos_tokens = bos_tokens
+        self.return_bos_tokens = return_bos_tokens
         self.alpha = alpha
         self.beta = beta
 
         # Initialise utility tokens with normal init, like usual Pytorch embeddings
-        if self._utility_tokens:
+        if self._bos_tokens:
             self._utility_token_embedding = nn.Parameter(
-                torch.empty(self._utility_tokens, d_model)
+                torch.empty(self._bos_tokens, d_model)
             )
             nn.init.normal_(self._utility_token_embedding, mean=0.0, std=1.0)
         else:
             self._utility_token_embedding = None
 
-        if self._utility_tokens and (self.seq_len is not None):
-            self.full_sequence_length = self.seq_len + self._utility_tokens
+        if self._bos_tokens and (self.seq_len is not None):
+            self.full_sequence_length = self.seq_len + self._bos_tokens
         else:
             self.full_sequence_length = self.seq_len
 
@@ -815,7 +815,7 @@ class TransformerEncoder(nn.Module):
                     relative_position_embedding=relative_position_embedding,
                     positional_heads=positional_heads,
                     source_size=source_size,
-                    utility_tokens=utility_tokens,
+                    bos_tokens=bos_tokens,
                     knocking_heads=knocking_heads,
                     ff_ratio=ff_ratio,
                     ff_inner_size=ff_inner_size,
@@ -848,7 +848,7 @@ class TransformerEncoder(nn.Module):
         return ",".join([str(block._kv_distance) for block in self.blocks])
 
     def preprocess(self, x):
-        if self._utility_tokens:
+        if self._bos_tokens:
             x = torch.cat(
                 [self._utility_token_embedding.expand(x.size(0), -1, -1), x], dim=1
             )
@@ -874,8 +874,8 @@ class TransformerEncoder(nn.Module):
         for block in self.blocks:
             x = block(x)
 
-        if self._utility_tokens and not self.return_utility_tokens:
-            return x[:, self._utility_tokens :, :]
+        if self._bos_tokens and not self.return_bos_tokens:
+            return x[:, self._bos_tokens :, :]
         else:
             return x
 
