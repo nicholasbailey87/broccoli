@@ -96,9 +96,9 @@ class MHAttention(nn.Module):
         seq_len=None,
         linear_module: nn.Module = nn.Linear,
         utility_tokens=0,
-        talking_heads=False,
+        knocking_heads=False,
         rotary_embedding=None,
-        positional_heads: Union[int, float] = 0.5,
+        positional_heads: Union[int, float] = 0.25,
         source_size=None,
         scaling="d",
         beta=1.0,
@@ -131,14 +131,26 @@ class MHAttention(nn.Module):
         if causal:
             assert seq_len is not None
 
-        self.talking_heads = talking_heads
+        self.knocking_heads = knocking_heads
 
-        if self.talking_heads:
-            self.head_projection = nn.Linear(n_heads, n_heads, bias=False)
-            self.sample_projection = nn.Linear(n_heads, n_heads, bias=False)
+        if self.knocking_heads:
+            if self.positional_heads < self.n_heads:
+                self.value_projection_pos = nn.Linear(
+                    self.positional_heads, self.positional_heads, bias=False
+                )
+                self.value_projection_non_pos = nn.Linear(
+                    n_heads - self.positional_heads,
+                    n_heads - self.positional_heads,
+                    bias=False,
+                )
+                nn.init.eye_(self.value_projection_pos.weight)
+            else:
+                self.value_projection_pos = None
+                self.value_projection_non_pos = nn.Linear(n_heads, n_heads, bias=False)
+            nn.init.eye_(self.value_projection_non_pos.weight)
         else:
-            self.head_projection = None
-            self.sample_projection = None
+            self.value_projection_pos = None
+            self.value_projection_non_pos = None
 
         self.embed_dim = embed_dim
         self.n_heads = n_heads
@@ -309,6 +321,20 @@ class MHAttention(nn.Module):
 
         q, k, v = self.q_proj(q), self.k_proj(k), self.v_proj(v)
 
+        if self.knocking_heads:
+            v = rearrange(v, "b t (h d) -> b t d h", h=self.n_heads)
+            if self.positional_heads < self.n_heads:
+                v_pos, v_non_pos = (
+                    v[:, :, :, : self.positional_heads],
+                    v[:, :, :, self.positional_heads :],
+                )
+                v_pos = self.value_projection_pos(v_pos)
+                v_non_pos = self.value_projection_non_pos(v_non_pos)
+                v = torch.cat([v_pos, v_non_pos], dim=3)
+            else:
+                v = self.value_projection_non_pos(v)
+            v = rearrange(v, "b t d h -> b t (h d)")
+
         if self.rotary_embedding is not None:
             q, k = self.add_axial_rope(q, k)
 
@@ -318,7 +344,7 @@ class MHAttention(nn.Module):
 
         q, k, v = self.project_qkv(q, k, v)
 
-        if FLASH_ATTN and not self.talking_heads:
+        if FLASH_ATTN:
             # Divide Q/K/V into heads
             q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
             k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
@@ -337,7 +363,7 @@ class MHAttention(nn.Module):
 
             return self.out_proj(output_without_heads)
         else:
-            # Divide Q/K/V into heads
+            # Divide Q/K/V into heads (differently than for flash-attn)
             q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
             k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
             v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
@@ -346,21 +372,11 @@ class MHAttention(nn.Module):
 
             qk_scores *= self.scaling_factor
 
-            if self.talking_heads:
-                qk_scores = torch.einsum(
-                    "b h i j, o h -> b o i j", qk_scores, self.head_projection.weight
-                )
-
             # Apply mask if causal (must come before softmax)
             if self.causal:
                 qk_scores.masked_fill_(self.mask, float("-inf"))
 
             qk_scores = F.softmax(qk_scores, dim=-1)
-
-            if self.talking_heads:
-                qk_scores = torch.einsum(
-                    "b h i j, o h -> b o i j", qk_scores, self.sample_projection.weight
-                )
 
             qk_scores = self.dropout(qk_scores)
 
@@ -398,10 +414,10 @@ class MHAttention(nn.Module):
         self.out_proj.reset_parameters()
         scale_parameters(self.out_proj, self.beta)
 
-        if self.talking_heads:
-            # Initialize close to identity
-            nn.init.eye_(self.head_projection.weight)
-            nn.init.eye_(self.sample_projection.weight)
+        if self.knocking_heads:
+            if self.positional_heads < self.n_heads:
+                nn.init.eye_(self.value_projection_pos.weight)
+            nn.init.eye_(self.value_projection_non_pos.weight)
 
 
 class FeedforwardBlock(nn.Module):
@@ -522,7 +538,7 @@ class EncoderBlock(nn.Module):
         positional_heads: Union[int, float] = 0.5,
         source_size=None,
         utility_tokens=0,
-        talking_heads=False,
+        knocking_heads=False,
         ff_ratio=4,
         ff_inner_size=None,
         activation: nn.Module = nn.ReLU,
@@ -598,7 +614,7 @@ class EncoderBlock(nn.Module):
             positional_heads=positional_heads,
             source_size=source_size,
             utility_tokens=utility_tokens,
-            talking_heads=talking_heads,
+            knocking_heads=knocking_heads,
             scaling=msa_scaling,
             beta=self.beta,
         )
@@ -714,7 +730,7 @@ class TransformerEncoder(nn.Module):
         causal=False,
         linear_module=nn.Linear,
         utility_tokens=0,
-        talking_heads=False,
+        knocking_heads=False,
         return_utility_tokens=False,
         pre_norm=True,
         post_norm=False,
@@ -744,12 +760,6 @@ class TransformerEncoder(nn.Module):
             )
 
         super().__init__()
-
-        if FLASH_ATTN and talking_heads:
-            warnings.warn(
-                "Using talking heads currently prevents using flash attention.",
-                stacklevel=2,
-            )
 
         self.seq_len = seq_len
         self.n_heads = n_heads
@@ -806,7 +816,7 @@ class TransformerEncoder(nn.Module):
                     positional_heads=positional_heads,
                     source_size=source_size,
                     utility_tokens=utility_tokens,
-                    talking_heads=talking_heads,
+                    knocking_heads=knocking_heads,
                     ff_ratio=ff_ratio,
                     ff_inner_size=ff_inner_size,
                     activation=activation,
