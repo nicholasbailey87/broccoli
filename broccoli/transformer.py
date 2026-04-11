@@ -213,7 +213,7 @@ class MHAttention(nn.Module):
         self, q: torch.Tensor, k: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Apply Axial RoPE to all tokens except utility tokens
+        Apply Axial RoPE to all tokens except bos tokens
         """
         if self.positional_heads == 0.0:
             return q, k
@@ -242,7 +242,7 @@ class MHAttention(nn.Module):
         q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
         k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
 
-        # We don't apply rotary embeddings to utility tokens
+        # We don't apply rotary embeddings to bos tokens
         q_util, q_img = (
             q[:, :, : self.bos_tokens, :],
             q[:, :, self.bos_tokens :, :],
@@ -769,14 +769,14 @@ class TransformerEncoder(nn.Module):
         self.alpha = alpha
         self.beta = beta
 
-        # Initialise utility tokens with normal init, like usual Pytorch embeddings
+        # Initialise bos tokens with normal init, like usual Pytorch embeddings
         if self._bos_tokens:
-            self._utility_token_embedding = nn.Parameter(
+            self._bos_token_embedding = nn.Parameter(
                 torch.empty(self._bos_tokens, d_model)
             )
-            nn.init.normal_(self._utility_token_embedding, mean=0.0, std=1.0)
+            nn.init.normal_(self._bos_token_embedding, mean=0.0, std=1.0)
         else:
-            self._utility_token_embedding = None
+            self._bos_token_embedding = None
 
         if self._bos_tokens and (self.seq_len is not None):
             self.full_sequence_length = self.seq_len + self._bos_tokens
@@ -850,7 +850,7 @@ class TransformerEncoder(nn.Module):
     def preprocess(self, x):
         if self._bos_tokens:
             x = torch.cat(
-                [self._utility_token_embedding.expand(x.size(0), -1, -1), x], dim=1
+                [self._bos_token_embedding.expand(x.size(0), -1, -1), x], dim=1
             )
         else:
             x = x
@@ -894,8 +894,8 @@ class TransformerEncoder(nn.Module):
         return torch.cat(layer_scores, dim=1)  # (batch, layer, head, seq_len, seq_len)
 
     def reset_parameters(self):
-        if self._utility_token_embedding is not None:
-            nn.init.normal_(self._utility_token_embedding, mean=0.0, std=1.0)
+        if self._bos_token_embedding is not None:
+            nn.init.normal_(self._bos_token_embedding, mean=0.0, std=1.0)
 
         if self.absolute_position_embedding is not None:
             self.absolute_position_embedding.reset_parameters()

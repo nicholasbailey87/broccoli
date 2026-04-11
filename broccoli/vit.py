@@ -650,7 +650,7 @@ class ViT(nn.Module):
                 " head class is SequencePoolClassificationHead"
             )
 
-    def head_to_utility_token_attention_logits(self, x):
+    def head_to_bos_token_attention_logits(self, x):
         all_attention = self.attention_logits(x)
         batch_averages = torch.mean(all_attention, dim=0, keepdim=False)
         sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
