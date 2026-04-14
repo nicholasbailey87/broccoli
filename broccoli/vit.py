@@ -461,7 +461,8 @@ class ViTEncoder(nn.Module):
         for module in self.preprocess:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
-        self.initial_ff.reset_parameters()
+        if hasattr(self, "initial_ff"):
+            self.initial_ff.reset_parameters()
         self.transformer.reset_parameters()
 
 
