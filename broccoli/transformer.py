@@ -667,6 +667,7 @@ class EncoderBlock(nn.Module):
             x = x + processed
             process_x = self.pre_mlp_norm(x)
         else:
+            x = x + processed
             process_x = x
 
         processed = self.drop_path(self.beta * self.ff(process_x))

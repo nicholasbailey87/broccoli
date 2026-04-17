@@ -214,13 +214,6 @@ class ViTEncoder(nn.Module):
         else:
             self.cnn_activation = cnn_activation()
 
-        if transformer_activation_kwargs is not None:
-            self.transformer_activation = transformer_activation(
-                **transformer_activation_kwargs
-            )
-        else:
-            self.transformer_activation = transformer_activation()
-
         self.input_size = input_size
         self.spatial_dimensions = len(self.input_size)
 
