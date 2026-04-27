@@ -424,9 +424,12 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.pooling_channels_padding,
-                nn.RMSNorm(transformer_embedding_size),
+                nn.RMSNorm(max(transformer_embedding_size, pooling_out_channels)),
             ]
         )
+
+        if transformer_embedding_size < pooling_out_channels:
+            self.adapter = nn.Linear(pooling_out_channels, transformer_embedding_size)
 
         self.reset_parameters()
 
@@ -434,10 +437,17 @@ class ViTEncoder(nn.Module):
         x = self.preprocess(x)
         if self.initial_ff is not None:
             if self.initial_ff_residual_path:
-                if self.transformer_post_norm:
-                    x = self.norm(self.alpha * x + self.beta * self.initial_ff(x))
+                if self.adapter is not None:
+                    residual = self.adapter(x)
                 else:
-                    x = x + self.initial_ff(x)
+                    residual = x
+
+                if self.transformer_post_norm:
+                    x = self.norm(
+                        self.alpha * residual + self.beta * self.initial_ff(x)
+                    )
+                else:
+                    x = residual + self.initial_ff(x)
             else:
                 if self.transformer_post_norm:
                     x = self.norm(self.initial_ff(x))
