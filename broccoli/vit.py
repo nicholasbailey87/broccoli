@@ -430,6 +430,7 @@ class ViTEncoder(nn.Module):
 
         if transformer_embedding_size < pooling_out_channels:
             self.adapter = nn.Linear(pooling_out_channels, transformer_embedding_size)
+            self.adapter_norm = nn.RMSNorm(transformer_embedding_size)
 
         self.reset_parameters()
 
@@ -438,7 +439,7 @@ class ViTEncoder(nn.Module):
         if self.initial_ff is not None:
             if self.initial_ff_residual_path:
                 if self.adapter is not None:
-                    residual = self.adapter(x)
+                    residual = self.adapter_norm(self.adapter(x))
                 else:
                     residual = x
 
