@@ -432,10 +432,18 @@ class ViTEncoder(nn.Module):
             adapter_out_size = transformer_embedding_size
             if transformer_activation.__name__.endswith("GLU"):
                 adapter_out_size *= 2
+
+            if transformer_activation_kwargs is not None:
+                adapter_activation = transformer_activation(
+                    **transformer_activation_kwargs
+                )
+            else:
+                adapter_activation = transformer_activation()
+
             self.adapter = nn.Sequential(
                 *[
                     nn.Linear(pooling_out_channels, adapter_out_size),
-                    transformer_activation(transformer_activation_kwargs),
+                    adapter_activation,
                     nn.RMSNorm(transformer_embedding_size),
                 ]
             )
