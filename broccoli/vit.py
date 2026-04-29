@@ -428,43 +428,16 @@ class ViTEncoder(nn.Module):
             ]
         )
 
-        if transformer_embedding_size < pooling_out_channels:
-            adapter_out_size = transformer_embedding_size
-            if transformer_activation.__name__.endswith("GLU"):
-                adapter_out_size *= 2
-
-            if transformer_activation_kwargs is not None:
-                adapter_activation = transformer_activation(
-                    **transformer_activation_kwargs
-                )
-            else:
-                adapter_activation = transformer_activation()
-
-            self.adapter = nn.Sequential(
-                *[
-                    nn.Linear(pooling_out_channels, adapter_out_size),
-                    adapter_activation,
-                    nn.RMSNorm(transformer_embedding_size),
-                ]
-            )
-
         self.reset_parameters()
 
     def forward(self, x):
         x = self.preprocess(x)
         if self.initial_ff is not None:
             if self.initial_ff_residual_path:
-                if self.adapter is not None:
-                    residual = self.adapter(x)
-                else:
-                    residual = x
-
                 if self.transformer_post_norm:
-                    x = self.norm(
-                        self.alpha * residual + self.beta * self.initial_ff(x)
-                    )
+                    x = self.norm(self.alpha * x + self.beta * self.initial_ff(x))
                 else:
-                    x = residual + self.initial_ff(x)
+                    x = x + self.initial_ff(x)
             else:
                 if self.transformer_post_norm:
                     x = self.norm(self.initial_ff(x))
