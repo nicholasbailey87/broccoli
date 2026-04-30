@@ -143,7 +143,7 @@ class MHAttention(nn.Module):
 
         self.causal = causal
         self.seq_len = seq_len
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = dropout
         if self.causal:
             self.register_buffer(
                 "mask",
