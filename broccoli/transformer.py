@@ -11,25 +11,11 @@ from einops import rearrange
 
 from .rope import RotaryEmbedding, apply_rotary_emb
 
-try:
-    from flash_attn import flash_attn_func
 
-    # Flash Attention requires Ampere (SM80) or newer
-    if torch.cuda.is_available():
-        major, _ = torch.cuda.get_device_capability()
-        if major >= 8:
-            print("Using flash-attn.")
-            FLASH_ATTN = True
-        else:
-            print(
-                f"flash-attn installed but GPU compute capability is {major}.x "
-                f"(need >= 8.0). Falling back to standard attention."
-            )
-            FLASH_ATTN = False
-    else:
-        FLASH_ATTN = False
-except ImportError:
-    FLASH_ATTN = False
+if torch.cuda.is_available():
+    major, _ = torch.cuda.get_device_capability()
+    if major >= 8:
+        print("Using flash-attn.")
 
 
 def scale_parameters(torch_module: nn.Module, factor: float):
@@ -344,47 +330,25 @@ class MHAttention(nn.Module):
 
         q, k, v = self.project_qkv(q, k, v)
 
-        if FLASH_ATTN:
-            # Divide Q/K/V into heads
-            q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
-            k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
-            v = rearrange(v, "b t (h d) -> b t h d", h=self.n_heads)
+        # PyTorch SDPA expects shape: (batch, heads, seq_len, head_dim)
+        q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
+        k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
+        v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
 
-            output_with_heads = flash_attn_func(
-                q,
-                k,
-                v,
-                dropout_p=self.dropout.p if self.training else 0.0,
-                softmax_scale=self.scaling_factor,
-                causal=self.causal,
-            )
+        # Native PyTorch SDPA uses Flash Attention if possible.
+        output_with_heads = F.scaled_dot_product_attention(
+            query=q,
+            key=k,
+            value=v,
+            attn_mask=None,  # is_causal handles this natively and memory-efficiently
+            dropout_p=self.dropout if self.training else 0.0,
+            is_causal=self.causal,
+            scale=self.scaling_factor,  # Preserves your custom "d" or "sqrtd" scaling
+        )
 
-            output_without_heads = rearrange(output_with_heads, "b t h d -> b t (h d)")
+        output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
 
-            return self.out_proj(output_without_heads)
-        else:
-            # Divide Q/K/V into heads (differently than for flash-attn)
-            q = rearrange(q, "b t (h d) -> b h t d", h=self.n_heads)
-            k = rearrange(k, "b t (h d) -> b h t d", h=self.n_heads)
-            v = rearrange(v, "b t (h d) -> b h t d", h=self.n_heads)
-
-            qk_scores = q @ k.transpose(-1, -2)
-
-            qk_scores *= self.scaling_factor
-
-            # Apply mask if causal (must come before softmax)
-            if self.causal:
-                qk_scores.masked_fill_(self.mask, float("-inf"))
-
-            qk_scores = F.softmax(qk_scores, dim=-1)
-
-            qk_scores = self.dropout(qk_scores)
-
-            output_with_heads = qk_scores @ v
-
-            output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
-
-            return self.out_proj(output_without_heads)
+        return self.out_proj(output_without_heads)
 
     def attention_logits(self, q, k, v):
 
@@ -438,11 +402,9 @@ class FeedforwardBlock(nn.Module):
         outer_dropout=None,
         linear_module_up=nn.Linear,
         linear_module_down=nn.Linear,
-        checkpoint=True,
     ):
         super().__init__()
 
-        self.checkpoint = checkpoint
         self.xglu = activation.__name__.endswith("GLU")
 
         if activation_kwargs is not None:
@@ -512,12 +474,7 @@ class FeedforwardBlock(nn.Module):
             self.linear_in.reset_rows(indices, incoming_data=x)
             self.linear_out.reset_columns(indices)
 
-        if self.checkpoint:
-            processed = checkpoint(self.process, x, use_reentrant=False)
-        else:
-            processed = self.process(x)
-
-        return processed
+        return self.process(x)
 
     def reset_parameters(self):
         # Iterate over the sequential block to reset parameters
@@ -555,7 +512,6 @@ class EncoderBlock(nn.Module):
         linear_module=nn.Linear,
         pre_norm=False,
         post_norm=True,
-        checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
     ):
@@ -640,7 +596,6 @@ class EncoderBlock(nn.Module):
                 if ff_linear_module_down is not None
                 else linear_module
             ),
-            checkpoint=checkpoint_ff,
         )
 
         self.reset_parameters()
@@ -736,7 +691,6 @@ class TransformerEncoder(nn.Module):
         pre_norm=True,
         post_norm=False,
         msa_scaling="d",
-        checkpoint_ff=True,
         alpha=1.0,
         beta=1.0,
     ):
@@ -834,7 +788,6 @@ class TransformerEncoder(nn.Module):
                     linear_module=linear_module,
                     pre_norm=pre_norm,
                     post_norm=post_norm,
-                    checkpoint_ff=checkpoint_ff,
                     alpha=alpha,
                     beta=beta,
                 )
@@ -873,7 +826,7 @@ class TransformerEncoder(nn.Module):
         x = self.preprocess(x)
 
         for block in self.blocks:
-            x = block(x)
+            x = checkpoint(block, x, use_reentrant=False)
 
         if self._bos_tokens and not self.return_bos_tokens:
             return x[:, self._bos_tokens :, :]
