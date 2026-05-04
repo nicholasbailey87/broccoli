@@ -24,9 +24,10 @@ class GetCLSToken(nn.Module):
 class SequencePool(nn.Module):
     def __init__(self, d_model, linear_module=nn.Linear):
         super().__init__()
+        self.nondecay_attention_pool = linear_module(d_model, 1)
         self.attention = nn.Sequential(
             *[
-                linear_module(d_model, 1),
+                self.nondecay_attention_pool,
                 Rearrange("batch seq 1 -> batch seq"),
                 nn.Softmax(dim=-1),
             ]
@@ -64,11 +65,7 @@ class ClassificationHead(nn.Module):
         self.d_model = d_model
         self.summarize = GetCLSToken()
 
-        if d_model == n_classes:
-            # No need to project
-            self.projection = nn.Identity()
-        else:
-            self.projection = logit_projection_layer(d_model, n_classes)
+        self.projection = logit_projection_layer(d_model, n_classes)
 
         if batch_norm_logits:
             self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
