@@ -24,10 +24,9 @@ class GetCLSToken(nn.Module):
 class SequencePool(nn.Module):
     def __init__(self, d_model, linear_module=nn.Linear):
         super().__init__()
-        self.nondecay_attention_pool = linear_module(d_model, 1)
         self.attention = nn.Sequential(
             *[
-                self.nondecay_attention_pool,
+                linear_module(d_model, 1),
                 Rearrange("batch seq 1 -> batch seq"),
                 nn.Softmax(dim=-1),
             ]
@@ -59,6 +58,7 @@ class ClassificationHead(nn.Module):
         d_model,
         n_classes,
         logit_projection_layer=nn.Linear,
+        batch_norm_logits=True,
     ):
         super().__init__()
         self.d_model = d_model
@@ -66,7 +66,10 @@ class ClassificationHead(nn.Module):
 
         self.projection = logit_projection_layer(d_model, n_classes)
 
-        self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
+        if batch_norm_logits:
+            self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
+        else:
+            self.batch_norm = nn.Identity()
 
         self.classification_process = nn.Sequential(
             *[
@@ -99,11 +102,13 @@ class SequencePoolClassificationHead(ClassificationHead):
         d_model,
         n_classes,
         logit_projection_layer=nn.Linear,
+        batch_norm_logits=True,
     ):
         super().__init__(
             d_model,
             n_classes,
             logit_projection_layer=logit_projection_layer,
+            batch_norm_logits=batch_norm_logits,
         )
 
         self.summarize = SequencePool(d_model, logit_projection_layer)
@@ -508,6 +513,7 @@ class ViT(nn.Module):
         transformer_msa_dropout=0.1,
         transformer_stochastic_depth=0.1,
         head=SequencePoolClassificationHead,
+        batch_norm_logits=True,
         logit_projection_layer=nn.Linear,
         linear_module=nn.Linear,
         alpha=1.0,
@@ -605,6 +611,7 @@ class ViT(nn.Module):
             transformer_embedding_size,
             image_classes,
             logit_projection_layer=logit_projection_layer,
+            batch_norm_logits=batch_norm_logits,
         )
 
         self.reset_parameters()
