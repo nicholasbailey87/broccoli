@@ -64,14 +64,14 @@ class ClassificationHead(nn.Module):
         self.d_model = d_model
         self.summarize = GetCLSToken()
 
-        self.nondecay_projection = logit_projection_layer(d_model, n_classes)
+        self.projection = logit_projection_layer(d_model, n_classes)
 
         self.batch_norm = nn.BatchNorm1d(n_classes, affine=False)
 
         self.classification_process = nn.Sequential(
             *[
                 self.summarize,
-                self.nondecay_projection,
+                self.projection,
                 self.batch_norm,
             ]
         )
@@ -111,7 +111,7 @@ class SequencePoolClassificationHead(ClassificationHead):
         self.classification_process = nn.Sequential(
             *[
                 self.summarize,
-                self.nondecay_projection,
+                self.projection,
                 self.batch_norm,
             ]
         )
