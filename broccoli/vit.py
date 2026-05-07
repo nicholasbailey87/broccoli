@@ -4,7 +4,7 @@ from typing import Optional, Union
 from .transformer import TransformerEncoder, FeedforwardBlock
 from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
 from .activation import ReLU, SquaredReLU, GELU, SwiGLU
-from .utils import PadTensor
+from .utils import PadTensor, ResizeAndPadPatches
 
 from einops import einsum
 from einops.layers.torch import Rearrange
@@ -327,6 +327,18 @@ class ViTEncoder(nn.Module):
             (0, max(0, transformer_embedding_size - pooling_out_channels))
         )
 
+        if (pooling_out_channels > transformer_embedding_size) and (
+            pooling_type == "concat"
+        ):
+            self.size_residual = ResizeAndPadPatches(
+                in_channels=cnn_activation_out_channels,
+                d_model=transformer_embedding_size,
+                patch_size=pooling_kernel_size,
+                spatial_dimensions=self.spatial_dimensions,
+            )
+        else:
+            self.size_residual = nn.Identity()
+
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
         if transformer_layers > 0:
@@ -427,10 +439,13 @@ class ViTEncoder(nn.Module):
         x = self.preprocess(x)
         if self.initial_ff is not None:
             if self.initial_ff_residual_path:
+                residual = self.size_residual(x)
                 if self.transformer_post_norm:
-                    x = self.norm(self.alpha * x + self.beta * self.initial_ff(x))
+                    x = self.norm(
+                        self.alpha * residual + self.beta * self.initial_ff(x)
+                    )
                 else:
-                    x = x + self.initial_ff(x)
+                    x = residual + self.initial_ff(x)
             else:
                 if self.transformer_post_norm:
                     x = self.norm(self.initial_ff(x))
@@ -440,7 +455,7 @@ class ViTEncoder(nn.Module):
 
     def attention_logits(self, x):
         x = self.preprocess(x)
-        x = x + self.initial_ff(x)
+        x = self.size_residual(x) + self.initial_ff(x)
         return self.transformer.attention_logits(x)
 
     def reset_parameters(self):
