@@ -638,7 +638,10 @@ class EncoderBlock(nn.Module):
             x = x + processed
             process_x = x
 
-        processed = stochastic_depth_mask * self.beta * self.ff(process_x)
+        processed = stochastic_depth_mask * self.ff(process_x)
+
+        if self.post_norm:
+            processed *= self.beta
 
         if self.post_norm:
             x = self.post_mlp_norm(alphas * x + processed)
