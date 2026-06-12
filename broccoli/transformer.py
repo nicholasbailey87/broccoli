@@ -24,43 +24,43 @@ def scale_parameters(torch_module: nn.Module, factor: float):
             param.mul_(factor)
 
 
-def drop_path(
-    x, drop_prob: float = 0.0, training: bool = False, scale_by_keep: bool = True
-):
-    """
-    From https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
-    Copyright 2019 Ross Wightman
-    See documentation and licence there.
-    """
-    if drop_prob == 0.0 or not training:
-        return x
-    keep_prob = 1 - drop_prob
-    shape = (x.shape[0],) + (1,) * (
-        x.ndim - 1
-    )  # work with diff dim tensors, not just 2D ConvNets
-    random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
-    if keep_prob > 0.0 and scale_by_keep:
-        random_tensor.div_(keep_prob)
-    return x * random_tensor
+# def drop_path(
+#     x, drop_prob: float = 0.0, training: bool = False, scale_by_keep: bool = True
+# ):
+#     """
+#     From https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
+#     Copyright 2019 Ross Wightman
+#     See documentation and licence there.
+#     """
+#     if drop_prob == 0.0 or not training:
+#         return x
+#     keep_prob = 1 - drop_prob
+#     shape = (x.shape[0],) + (1,) * (
+#         x.ndim - 1
+#     )  # work with diff dim tensors, not just 2D ConvNets
+#     random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+#     if keep_prob > 0.0 and scale_by_keep:
+#         random_tensor.div_(keep_prob)
+#     return x * random_tensor
 
 
-class DropPath(nn.Module):
-    """
-    From https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
-    Copyright 2019 Ross Wightman
-    See documentation and licence there.
-    """
+# class DropPath(nn.Module):
+#     """
+#     From https://github.com/huggingface/pytorch-image-models/blob/main/timm/layers/drop.py
+#     Copyright 2019 Ross Wightman
+#     See documentation and licence there.
+#     """
 
-    def __init__(self, drop_prob: float = 0.0, scale_by_keep: bool = True):
-        super(DropPath, self).__init__()
-        self.drop_prob = drop_prob
-        self.scale_by_keep = scale_by_keep
+#     def __init__(self, drop_prob: float = 0.0, scale_by_keep: bool = True):
+#         super(DropPath, self).__init__()
+#         self.drop_prob = drop_prob
+#         self.scale_by_keep = scale_by_keep
 
-    def forward(self, x):
-        return drop_path(x, self.drop_prob, self.training, self.scale_by_keep)
+#     def forward(self, x):
+#         return drop_path(x, self.drop_prob, self.training, self.scale_by_keep)
 
-    def extra_repr(self):
-        return f"drop_prob={round(self.drop_prob, 3):0.3f}"
+#     def extra_repr(self):
+#         return f"drop_prob={round(self.drop_prob, 3):0.3f}"
 
 
 class MHAttention(nn.Module):
@@ -537,7 +537,9 @@ class EncoderBlock(nn.Module):
         self.alpha = alpha
         self.beta = beta
 
-        self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
+        self.identity_probability = identity_probability
+
+        # self.drop_path = DropPath(drop_prob=identity_probability, scale_by_keep=True)
 
         if self.pre_norm:
             self.pre_attention_norm = nn.RMSNorm(d_model)
@@ -606,6 +608,17 @@ class EncoderBlock(nn.Module):
 
     def forward(self, x):
 
+        if self.training:
+            keep_prob = 1 - self.identity_probability
+            stochastic_depth_mask_shape = (x.size(0), 1, 1)
+            stochastic_depth_mask = x.new_empty(stochastic_depth_mask_shape).bernoulli_(
+                keep_prob
+            )
+            alphas = (self.alpha - 1) * stochastic_depth_mask + 1
+        else:
+            stochastic_depth_mask = 1.0
+            alphas = self.alpha
+
         if self.pre_norm:
             process_x = self.pre_attention_norm(x)
         else:
@@ -613,10 +626,10 @@ class EncoderBlock(nn.Module):
 
         processed = self.attn(process_x, process_x, process_x)
 
-        processed = self.drop_path(processed)
+        processed = stochastic_depth_mask * processed
 
         if self.post_norm:
-            x = self.post_attention_norm(self.alpha * x + processed)
+            x = self.post_attention_norm(alphas * x + processed)
             process_x = x
         elif self.pre_norm:
             x = x + processed
@@ -625,10 +638,12 @@ class EncoderBlock(nn.Module):
             x = x + processed
             process_x = x
 
-        processed = self.drop_path(self.beta * self.ff(process_x))
+        processed = stochastic_depth_mask * self.beta * self.ff(process_x)
 
         if self.post_norm:
-            x = self.post_mlp_norm(self.alpha * x + processed)
+            x = self.post_mlp_norm(alphas * x + processed)
+        else:
+            x = x + processed
 
         return x
 
@@ -683,6 +698,7 @@ class TransformerEncoder(nn.Module):
         ff_outer_dropout=0.0,
         msa_dropout=0.0,
         stochastic_depth=0.0,
+        depthwise_linear_stochastic_depth=True,
         causal=False,
         linear_module=nn.Linear,
         bos_tokens=0,
@@ -755,10 +771,14 @@ class TransformerEncoder(nn.Module):
 
         if n_layers == 1:
             self.stochastic_depth_probabilities = [0.0]
-        else:
+        elif depthwise_linear_stochastic_depth:
             step_size = self.stochastic_depth / (n_layers - 1)
             self.stochastic_depth_probabilities = [
                 i * step_size for i in range(n_layers)
+            ]
+        else:
+            self.stochastic_depth_probabilities = [
+                self.stochastic_depth for _ in range(n_layers)
             ]
 
         self.blocks = nn.ModuleList(
