@@ -139,6 +139,9 @@ class MHAttention(nn.Module):
         self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
 
+        self.q_norm = nn.RMSNorm(self.head_dim)
+        self.k_norm = nn.RMSNorm(self.head_dim)
+
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
 
         self.causal = causal
@@ -264,6 +267,7 @@ class MHAttention(nn.Module):
         freqs = self.rotary_embedding.get_axial_freqs(*self.source_size)
 
         # norm Qs/Ks to protect axial rope, like https://arxiv.org/abs/2302.05442
+
         q_img = apply_rotary_emb(freqs, q_img)
         k_img = apply_rotary_emb(freqs, k_img)
 
@@ -307,6 +311,13 @@ class MHAttention(nn.Module):
 
         q, k, v = self.q_proj(q), self.k_proj(k), self.v_proj(v)
 
+        q = rearrange(q, "b t (h d) -> b t h d", h=self.n_heads)
+        k = rearrange(k, "b t (h d) -> b t h d", h=self.n_heads)
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        q = rearrange(q, "b t h d -> b t (h d)")
+        k = rearrange(k, "b t h d -> b t (h d)")
+
         if self.knocking_heads:
             v = rearrange(v, "b t (h d) -> b t d h", h=self.n_heads)
             if self.positional_heads < self.n_heads:
@@ -340,10 +351,10 @@ class MHAttention(nn.Module):
             query=q,
             key=k,
             value=v,
-            attn_mask=None,  # is_causal handles this natively and memory-efficiently
+            attn_mask=None,
             dropout_p=self.dropout if self.training else 0.0,
             is_causal=self.causal,
-            scale=self.scaling_factor,  # Preserves your custom "d" or "sqrtd" scaling
+            scale=self.scaling_factor,
         )
 
         output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
@@ -374,6 +385,10 @@ class MHAttention(nn.Module):
         self.q_proj.reset_parameters()
         self.k_proj.reset_parameters()
         self.v_proj.reset_parameters()
+
+        self.q_norm.reset_parameters()
+        self.k_norm.reset_parameters()
+
         scale_parameters(self.v_proj, self.beta)
         self.out_proj.reset_parameters()
         scale_parameters(self.out_proj, self.beta)
