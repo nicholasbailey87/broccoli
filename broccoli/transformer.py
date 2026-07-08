@@ -87,7 +87,6 @@ class MHAttention(nn.Module):
         positional_heads: Union[int, float] = 0.25,
         source_size=None,
         scaling="d",
-        beta=1.0,
     ):
         """
         Args:
@@ -109,8 +108,6 @@ class MHAttention(nn.Module):
         elif isinstance(positional_heads, int):
             assert positional_heads <= n_heads
             self.positional_heads = positional_heads
-
-        self.beta = beta
 
         if rotary_embedding is not None:
             assert source_size is not None
@@ -141,6 +138,7 @@ class MHAttention(nn.Module):
 
         self.q_norm = nn.RMSNorm(self.head_dim)
         self.k_norm = nn.RMSNorm(self.head_dim)
+        self.out_norm = nn.RMSNorm(self.embed_dim)
 
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
 
@@ -359,7 +357,7 @@ class MHAttention(nn.Module):
 
         output_without_heads = rearrange(output_with_heads, "b h t d -> b t (h d)")
 
-        return self.out_proj(output_without_heads)
+        return self.out_norm(self.out_proj(output_without_heads))
 
     def attention_logits(self, q, k, v):
 
@@ -589,7 +587,6 @@ class EncoderBlock(nn.Module):
             bos_tokens=bos_tokens,
             knocking_heads=knocking_heads,
             scaling=msa_scaling,
-            beta=self.beta,
         )
 
         # Submodule for the feedforward process
