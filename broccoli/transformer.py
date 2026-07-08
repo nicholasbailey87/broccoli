@@ -389,9 +389,9 @@ class MHAttention(nn.Module):
         self.q_norm.reset_parameters()
         self.k_norm.reset_parameters()
 
-        scale_parameters(self.v_proj, self.beta)
+        # scale_parameters(self.v_proj, self.beta)
         self.out_proj.reset_parameters()
-        scale_parameters(self.out_proj, self.beta)
+        # scale_parameters(self.out_proj, self.beta)
 
         if self.knocking_heads:
             if self.positional_heads < self.n_heads:
@@ -644,6 +644,7 @@ class EncoderBlock(nn.Module):
         processed = stochastic_depth_mask * processed
 
         if self.post_norm:
+            processed *= self.beta
             x = self.post_attention_norm(alphas * x + processed)
             process_x = x
         elif self.pre_norm:
@@ -657,8 +658,6 @@ class EncoderBlock(nn.Module):
 
         if self.post_norm:
             processed *= self.beta
-
-        if self.post_norm:
             x = self.post_mlp_norm(alphas * x + processed)
         else:
             x = x + processed
