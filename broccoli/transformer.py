@@ -138,7 +138,7 @@ class MHAttention(nn.Module):
 
         self.q_norm = nn.RMSNorm(self.head_dim)
         self.k_norm = nn.RMSNorm(self.head_dim)
-        self.out_norm = nn.RMSNorm(self.embed_dim)
+        self.out_norm = nn.RMSNorm(self.embed_dim, elementwise_affine=False)
 
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
 
@@ -451,7 +451,7 @@ class FeedforwardBlock(nn.Module):
                 nn.RMSNorm(self.inner_size),
                 self.inner_dropout,
                 self.linear_out,
-                nn.RMSNorm(output_features),
+                nn.RMSNorm(output_features, elementwise_affine=False),
                 self.outer_dropout,
             ]
         )
