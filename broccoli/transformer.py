@@ -138,7 +138,7 @@ class MHAttention(nn.Module):
 
         self.q_norm = nn.RMSNorm(self.head_dim, elementwise_affine=False)
         self.k_norm = nn.RMSNorm(self.head_dim, elementwise_affine=False)
-        self.out_norm = nn.RMSNorm(self.embed_dim, elementwise_affine=False)
+        self.out_norm = nn.RMSNorm(self.embed_dim)
 
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
 
@@ -391,6 +391,10 @@ class MHAttention(nn.Module):
         self.out_proj.reset_parameters()
         # scale_parameters(self.out_proj, self.beta)
 
+        self.out_norm.reset_parameters()
+        with torch.no_grad():
+            self.out_norm.weight.zero_()
+
         if self.knocking_heads:
             if self.positional_heads < self.n_heads:
                 nn.init.eye_(self.value_projection_pos.weight)
@@ -443,6 +447,7 @@ class FeedforwardBlock(nn.Module):
 
         self.linear_in = linear_module_up(input_features, self.max_inner_size)
         self.linear_out = linear_module_down(self.inner_size, output_features)
+        self.out_norm = nn.RMSNorm(output_features)
 
         self.process = nn.Sequential(
             *[
@@ -451,7 +456,7 @@ class FeedforwardBlock(nn.Module):
                 nn.RMSNorm(self.inner_size),
                 self.inner_dropout,
                 self.linear_out,
-                nn.RMSNorm(output_features, elementwise_affine=False),
+                self.out_norm,
                 self.outer_dropout,
             ]
         )
@@ -494,6 +499,9 @@ class FeedforwardBlock(nn.Module):
         for module in self.process:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
+
+        with torch.no_grad():
+            self.out_norm.weight.zero_()
 
 
 class EncoderBlock(nn.Module):
@@ -718,8 +726,8 @@ class TransformerEncoder(nn.Module):
         bos_tokens=0,
         knocking_heads=False,
         return_bos_tokens=False,
-        pre_norm=True,
-        post_norm=False,
+        pre_norm=False,
+        post_norm=True,
         msa_scaling="d",
         alpha=1.0,
         beta=1.0,
