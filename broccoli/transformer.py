@@ -386,14 +386,11 @@ class MHAttention(nn.Module):
 
         self.q_norm.reset_parameters()
         self.k_norm.reset_parameters()
+        self.out_norm.reset_parameters()
 
         # scale_parameters(self.v_proj, self.beta)
         self.out_proj.reset_parameters()
         # scale_parameters(self.out_proj, self.beta)
-
-        self.out_norm.reset_parameters()
-        with torch.no_grad():
-            self.out_norm.weight.zero_()
 
         if self.knocking_heads:
             if self.positional_heads < self.n_heads:
@@ -499,9 +496,6 @@ class FeedforwardBlock(nn.Module):
         for module in self.process:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
-
-        with torch.no_grad():
-            self.out_norm.weight.zero_()
 
 
 class EncoderBlock(nn.Module):
