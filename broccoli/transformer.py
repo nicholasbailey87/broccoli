@@ -136,8 +136,8 @@ class MHAttention(nn.Module):
         self.k_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
         self.v_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
 
-        self.q_norm = nn.RMSNorm(self.head_dim)
-        self.k_norm = nn.RMSNorm(self.head_dim)
+        self.q_norm = nn.RMSNorm(self.head_dim, elementwise_affine=False)
+        self.k_norm = nn.RMSNorm(self.head_dim, elementwise_affine=False)
         self.out_norm = nn.RMSNorm(self.embed_dim, elementwise_affine=False)
 
         self.out_proj = linear_module(self.embed_dim, self.embed_dim, bias=False)
