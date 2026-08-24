@@ -24,9 +24,10 @@ class GetCLSToken(nn.Module):
 class SequencePool(nn.Module):
     def __init__(self, d_model, linear_module=nn.Linear):
         super().__init__()
+        self.nondecay_linear = linear_module(d_model, 1)
         self.attention = nn.Sequential(
             *[
-                linear_module(d_model, 1),
+                self.nondecay_linear,
                 Rearrange("batch seq 1 -> batch seq"),
                 nn.Softmax(dim=-1),
             ]
@@ -416,9 +417,6 @@ class ViTEncoder(nn.Module):
                     or transformer_ff_linear_module_down
                     or linear_module
                 ),
-                # This block is the model's embedding layer: nothing learned
-                # precedes it, so its linears are named for exclusion from
-                # weight decay.
                 embedding=True,
             )
             self.norm = nn.RMSNorm(transformer_embedding_size)

@@ -443,12 +443,6 @@ class FeedforwardBlock(nn.Module):
         else:
             self.max_inner_size = self.inner_size
 
-        # When this block serves as a model's embedding layer (e.g. the initial
-        # feedforward block of a ViT), its linear layers are registered under
-        # names containing "embedding" so that optimisers which select
-        # parameter groups by name -- gradboard's weight decay exclusion in
-        # particular -- can pick them out. The `linear_in` and `linear_out`
-        # properties below keep the rest of the code agnostic to the suffix.
         self.linear_suffix = "_embedding" if embedding else ""
         setattr(
             self,
@@ -499,9 +493,6 @@ class FeedforwardBlock(nn.Module):
 
     @property
     def linear_in(self):
-        # Read straight out of `_modules`: when `linear_suffix` is empty this
-        # property shares its name with the registered module, so `getattr`
-        # would find the property again and recurse.
         return self._modules[f"linear_in{self.linear_suffix}"]
 
     @property
