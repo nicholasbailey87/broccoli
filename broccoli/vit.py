@@ -416,6 +416,10 @@ class ViTEncoder(nn.Module):
                     or transformer_ff_linear_module_down
                     or linear_module
                 ),
+                # This block is the model's embedding layer: nothing learned
+                # precedes it, so its linears are named for exclusion from
+                # weight decay.
+                embedding=True,
             )
             self.norm = nn.RMSNorm(transformer_embedding_size)
         else:
@@ -560,17 +564,6 @@ class ViT(nn.Module):
         self.beta = beta
 
         self.transformer_embedding_size = transformer_embedding_size
-
-        if transformer_ff_ratio is not None:
-            self.transformer_ff_ratio = transformer_ff_ratio
-            self.transformer_ff_inner_size = int(
-                transformer_ff_ratio * transformer_embedding_size
-            )
-        else:
-            self.transformer_ff_ratio = (
-                transformer_ff_inner_size / transformer_embedding_size
-            )
-            self.transformer_ff_inner_size = transformer_ff_inner_size
 
         self.encoder = ViTEncoder(
             input_size=input_size,
