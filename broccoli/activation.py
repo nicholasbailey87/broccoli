@@ -32,12 +32,15 @@ class GELU(nn.Module):
     A GELU activation function with optional clamp.
     """
 
-    def __init__(self, clamp=True) -> None:
+    def __init__(self, clamp=True, rmsnorm=False) -> None:
         super().__init__()
         self.clamp = clamp
+        self.rmsnorm = rmsnorm
         self.gelu = nn.GELU()
 
     def forward(self, x):
+        if self.rmsnorm:
+            x = F.rms_norm(x, x.shape[-1:])
         gelu = self.gelu(x)
         if self.clamp:
             gelu = torch.clamp(gelu, max=6)
@@ -92,12 +95,16 @@ class XGLU(nn.Module):
     Generic Gated Linear Unit
     """
 
-    def __init__(self, activation_module: nn.Module) -> None:
+    def __init__(self, activation_module: nn.Module, rmsnorm: bool = False) -> None:
         super().__init__()
         self.activation = activation_module
+        self.rmsnorm = rmsnorm
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate, value = x.chunk(2, dim=-1)
+        if self.rmsnorm:
+            gate = F.rms_norm(gate, gate.shape[-1:])
+            value = F.rms_norm(value, value.shape[-1:])
         return self.activation(gate) * value
 
 
@@ -116,3 +123,17 @@ def SwiGLU() -> XGLU:
     Factory function that creates a GLU with a Swish activation.
     """
     return XGLU(Swish())
+
+
+def NormedSwiGLU() -> XGLU:
+    """
+    Factory function that creates a GLU with a Swish activation and normed halves.
+    """
+    return XGLU(Swish(), rmsnorm=True)
+
+
+def NormedGELU(clamp=False) -> GELU:
+    """
+    Factory function that creates a GELU with a normed input.
+    """
+    return GELU(clamp=clamp, rmsnorm=True)
