@@ -125,6 +125,38 @@ class SequencePoolClassificationHead(ClassificationHead):
         self.reset_parameters()
 
 
+def _image_patch_geometry(
+    spatial_dimensions,
+    cnn,
+    cnn_kernel_size,
+    cnn_kernel_stride,
+    cnn_padding,
+    pooling_type,
+    pooling_kernel_size,
+    pooling_kernel_stride,
+    pooling_padding,
+):
+    """
+    Kernel size, stride and padding for cutting the raw image into patches for
+    `images_in_stream`: like the pooling layer, or failing that like the CNN, or
+    failing that one pixel per token.
+    """
+    if pooling_type is not None:
+        return pooling_kernel_size, pooling_kernel_stride, pooling_padding
+    if not cnn:
+        return 1, 1, 0
+    if cnn_padding == "same":
+        # SpaceToDepth only takes integer padding
+        padding = tuple(
+            (k - 1) // 2 for k in spatial_tuple(cnn_kernel_size, spatial_dimensions)
+        )
+    elif cnn_padding == "valid":
+        padding = 0
+    else:
+        padding = cnn_padding
+    return cnn_kernel_size, cnn_kernel_stride, padding
+
+
 class ViTEncoder(nn.Module):
     """
     Based on the Compact Convolutional Transformer (CCT) of [Hasani et al. (2021)
@@ -154,6 +186,7 @@ class ViTEncoder(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
+        images_in_stream=False,
         transformer_feedforward_first=True,
         transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
@@ -196,6 +229,12 @@ class ViTEncoder(nn.Module):
                 Enforces positional_heads <= n_heads. If positional_heads is an int,
                 that many heads will have positional embedding. Otherwise,
                 floor(positional_heads * n_heads) will have positional embedding.
+            images_in_stream: if True, the raw image is cut into patches (with the
+                pooling kernel/stride/padding, or the CNN's if there is no
+                pooling, or one pixel per token if there is neither), RMSNormed,
+                resized/padded to the embedding size and added to the residual
+                stream, whatever the initial FF is doing. Raises if the patches
+                don't land on the same token grid as the stem.
         """
 
         super().__init__()
@@ -214,28 +253,17 @@ class ViTEncoder(nn.Module):
         self.input_size = input_size
         self.spatial_dimensions = len(self.input_size)
 
-        if self.spatial_dimensions == 1:
-            maxpoolxd = nn.MaxPool1d
-            avgpoolxd = nn.AvgPool1d
-            convxd = nn.Conv1d
-            batchnormxd = nn.BatchNorm1d
-            spatial_dim_names = "D1"
-        elif self.spatial_dimensions == 2:
-            maxpoolxd = nn.MaxPool2d
-            avgpoolxd = nn.AvgPool2d
-            convxd = nn.Conv2d
-            batchnormxd = nn.BatchNorm2d
-            spatial_dim_names = "D1 D2"
-        elif self.spatial_dimensions == 3:
-            maxpoolxd = nn.MaxPool3d
-            avgpoolxd = nn.AvgPool3d
-            convxd = nn.Conv3d
-            batchnormxd = nn.BatchNorm3d
-            spatial_dim_names = "D1 D2 D3"
-        else:
+        if self.spatial_dimensions not in (1, 2, 3):
             raise NotImplementedError(
                 "`input_size` must be a tuple of length 1, 2, or 3."
             )
+        maxpoolxd = getattr(nn, f"MaxPool{self.spatial_dimensions}d")
+        avgpoolxd = getattr(nn, f"AvgPool{self.spatial_dimensions}d")
+        convxd = getattr(nn, f"Conv{self.spatial_dimensions}d")
+        batchnormxd = getattr(nn, f"BatchNorm{self.spatial_dimensions}d")
+        spatial_dim_names = " ".join(
+            f"D{i + 1}" for i in range(self.spatial_dimensions)
+        )
 
         if cnn:
             # This block rhymes:
@@ -423,6 +451,63 @@ class ViTEncoder(nn.Module):
         else:
             self.initial_ff = None
 
+        if images_in_stream:
+            image_patch_kernel_size, image_patch_stride, image_patch_padding = (
+                _image_patch_geometry(
+                    self.spatial_dimensions,
+                    cnn=cnn,
+                    cnn_kernel_size=cnn_kernel_size,
+                    cnn_kernel_stride=cnn_kernel_stride,
+                    cnn_padding=cnn_padding,
+                    pooling_type=pooling_type,
+                    pooling_kernel_size=pooling_kernel_size,
+                    pooling_kernel_stride=pooling_kernel_stride,
+                    pooling_padding=pooling_padding,
+                )
+            )
+            image_patch_output_size = calculate_output_spatial_size(
+                input_size,
+                kernel_size=image_patch_kernel_size,
+                stride=image_patch_stride,
+                padding=image_patch_padding,
+                dilation=1,
+            )
+            if tuple(image_patch_output_size) != tuple(pooling_output_size):
+                raise ValueError(
+                    f"`images_in_stream` patches the image to a grid of "
+                    f"{tuple(image_patch_output_size)} but the stem produces "
+                    f"{tuple(pooling_output_size)}."
+                )
+            image_patch_channels = in_channels * math.prod(
+                spatial_tuple(image_patch_kernel_size, self.spatial_dimensions)
+            )
+            self.image_patches = nn.Sequential(
+                *[
+                    SpaceToDepth(
+                        image_patch_kernel_size,
+                        stride=image_patch_stride,
+                        padding=image_patch_padding,
+                        spatial_dimensions=self.spatial_dimensions,
+                    ),
+                    Rearrange(f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"),
+                    nn.RMSNorm(image_patch_channels),
+                    (
+                        ResizeAndPadPatches(
+                            in_channels=in_channels,
+                            d_model=transformer_embedding_size,
+                            patch_size=image_patch_kernel_size,
+                            spatial_dimensions=self.spatial_dimensions,
+                        )
+                        if image_patch_channels > transformer_embedding_size
+                        else PadTensor(
+                            (0, transformer_embedding_size - image_patch_channels)
+                        )
+                    ),
+                ]
+            )
+        else:
+            self.image_patches = None
+
         self.preprocess = nn.Sequential(
             *[
                 batchnormxd(in_channels) if initial_batch_norm else nn.Identity(),
@@ -439,28 +524,38 @@ class ViTEncoder(nn.Module):
 
         self.reset_parameters()
 
-    def forward(self, x):
-        x = self.preprocess(x)
+    def embed(self, x):
+        preprocessed = self.preprocess(x)
+
         if self.initial_ff is not None:
-            if self.initial_ff_residual_path:
-                residual = self.size_residual(x)
-                if self.transformer_post_norm:
-                    x = self.norm(
-                        self.alpha * residual + self.beta * self.initial_ff(x)
-                    )
-                else:
-                    x = residual + self.initial_ff(x)
-            else:
-                if self.transformer_post_norm:
-                    x = self.norm(self.initial_ff(x))
-                else:
-                    x = self.initial_ff(x)
-        return self.transformer(x)
+            branch = self.initial_ff(preprocessed)
+            residual = (
+                self.size_residual(preprocessed)
+                if self.initial_ff_residual_path
+                else None
+            )
+        else:
+            branch = None
+            residual = preprocessed
+
+        if self.image_patches is not None:
+            image_patches = self.image_patches(x)
+            residual = image_patches if residual is None else residual + image_patches
+
+        if branch is None:
+            return residual
+        elif residual is None:
+            return self.norm(branch) if self.transformer_post_norm else branch
+        elif self.transformer_post_norm:
+            return self.norm(self.alpha * residual + self.beta * branch)
+        else:
+            return residual + branch
+
+    def forward(self, x):
+        return self.transformer(self.embed(x))
 
     def attention_logits(self, x):
-        x = self.preprocess(x)
-        x = self.size_residual(x) + self.initial_ff(x)
-        return self.transformer.attention_logits(x)
+        return self.transformer.attention_logits(self.embed(x))
 
     def reset_parameters(self):
         for module in self.preprocess:
@@ -468,6 +563,10 @@ class ViTEncoder(nn.Module):
                 module.reset_parameters()
         if self.initial_ff is not None:
             self.initial_ff.reset_parameters()
+        if self.image_patches is not None:
+            for module in self.image_patches:
+                if hasattr(module, "reset_parameters"):
+                    module.reset_parameters()
         self.transformer.reset_parameters()
 
 
@@ -501,6 +600,7 @@ class ViT(nn.Module):
         pooling_kernel_size=3,
         pooling_kernel_stride=2,
         pooling_padding=1,
+        images_in_stream=False,
         transformer_feedforward_first=True,
         transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
@@ -581,6 +681,7 @@ class ViT(nn.Module):
             pooling_kernel_size=pooling_kernel_size,
             pooling_kernel_stride=pooling_kernel_stride,
             pooling_padding=pooling_padding,
+            images_in_stream=images_in_stream,
             transformer_feedforward_first=transformer_feedforward_first,
             transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
             transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
