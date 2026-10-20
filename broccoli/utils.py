@@ -17,10 +17,10 @@ class PadTensor(nn.Module):
             return F.pad(x, *self.args, **self.kwargs)
 
 
-class ResizeAndPadPatches(nn.Module):
+class ResizePatches(nn.Module):
     """
-    Resizes and pads image patches so that the flattened size will be
-        smaller than d_model
+    Resizes image patches to the largest patch whose flattened size fits in
+        d_model. The flattened size is `out_dim`, which may fall short of d_model.
     """
 
     def __init__(self, in_channels, d_model, patch_size, spatial_dimensions=2):
@@ -50,15 +50,11 @@ class ResizeAndPadPatches(nn.Module):
 
         self.out_dim = in_channels * math.prod(self.out_size)
 
-        # Pad up the remaining gap to strictly match d_model
-        self.pad = PadTensor((0, max(0, d_model - self.out_dim)))
-
     def forward(self, x):
         N, S, D = x.shape
 
-        x_spatial = x.view(N * S, self.in_channels, *self.patch_size)
+        x_spatial = x.reshape(N * S, self.in_channels, *self.patch_size)
 
         x_down = F.interpolate(x_spatial, size=self.out_size, mode=self.mode)
 
-        x_flat = x_down.view(N, S, self.out_dim)
-        return self.pad(x_flat)
+        return x_down.view(N, S, self.out_dim)

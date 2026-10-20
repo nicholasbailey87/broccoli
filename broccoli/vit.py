@@ -3,14 +3,24 @@ from typing import Optional, Union
 
 from .transformer import TransformerEncoder, FeedforwardBlock
 from .cnn import SpaceToDepth, calculate_output_spatial_size, spatial_tuple
-from .activation import ReLU, SquaredReLU, GELU, SwiGLU
-from .utils import PadTensor, ResizeAndPadPatches
+from .activation import ReLU, SquaredReLU, GELU, SwiGLU, NormedGELU, NormedSwiGLU
+from .utils import PadTensor, ResizePatches
 
 from einops import einsum
 from einops.layers.torch import Rearrange
 
 import torch
 import torch.nn as nn
+
+
+ACTIVATIONS = {
+    "ReLU": ReLU,
+    "SquaredReLU": SquaredReLU,
+    "GELU": GELU,
+    "NormedGELU": NormedGELU,
+    "SwiGLU": SwiGLU,
+    "NormedSwiGLU": NormedSwiGLU,
+}
 
 
 class GetCLSToken(nn.Module):
@@ -188,12 +198,13 @@ class ViTEncoder(nn.Module):
         pooling_padding=1,
         images_in_stream=False,
         transformer_feedforward_first=True,
-        transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
         transformer_initial_ff_dropout=None,
         transformer_initial_ff_inner_dropout=None,
         transformer_initial_ff_outer_dropout=None,
+        transformer_initial_ff_activation: Optional[nn.Module] = None,
+        transformer_initial_ff_activation_kwargs: Optional[dict] = None,
         transformer_pre_norm=True,
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
@@ -242,8 +253,8 @@ class ViTEncoder(nn.Module):
         self.alpha = alpha
         self.beta = beta
 
-        self.initial_ff_residual_path = transformer_initial_ff_residual_path
         self.transformer_post_norm = transformer_post_norm
+        self.stem_output_norm = nn.RMSNorm(transformer_embedding_size)
 
         if cnn_activation_kwargs is not None:
             self.cnn_activation = cnn_activation(**cnn_activation_kwargs)
@@ -357,18 +368,6 @@ class ViTEncoder(nn.Module):
             (0, max(0, transformer_embedding_size - pooling_out_channels))
         )
 
-        if (pooling_out_channels > transformer_embedding_size) and (
-            pooling_type == "concat"
-        ):
-            self.size_residual = ResizeAndPadPatches(
-                in_channels=cnn_activation_out_channels,
-                d_model=transformer_embedding_size,
-                patch_size=pooling_kernel_size,
-                spatial_dimensions=self.spatial_dimensions,
-            )
-        else:
-            self.size_residual = nn.Identity()
-
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
         if transformer_layers > 0:
@@ -413,8 +412,16 @@ class ViTEncoder(nn.Module):
                 transformer_embedding_size,
                 ratio=transformer_ff_ratio,
                 inner_size=transformer_ff_inner_size,
-                activation=transformer_activation,
-                activation_kwargs=transformer_activation_kwargs,
+                activation=(
+                    transformer_initial_ff_activation or transformer_activation
+                ),
+                activation_kwargs=(
+                    # Kwargs belong to an activation, so only fall back to the
+                    # transformer's when falling back to its activation too
+                    transformer_initial_ff_activation_kwargs
+                    if transformer_initial_ff_activation is not None
+                    else transformer_activation_kwargs
+                ),
                 dropout=(
                     # First truthy assigned value
                     transformer_initial_ff_dropout
@@ -446,7 +453,6 @@ class ViTEncoder(nn.Module):
                     or linear_module
                 ),
             )
-            self.norm = nn.RMSNorm(transformer_embedding_size)
         else:
             self.initial_ff = None
 
@@ -480,6 +486,19 @@ class ViTEncoder(nn.Module):
             image_patch_channels = in_channels * math.prod(
                 spatial_tuple(image_patch_kernel_size, self.spatial_dimensions)
             )
+            # Resize, then norm, then pad: the norm sees exactly the channels
+            # that go into the stream, so its scale survives and none of its
+            # gains are spent on zeros
+            if image_patch_channels > transformer_embedding_size:
+                resize_image_patches = ResizePatches(
+                    in_channels=in_channels,
+                    d_model=transformer_embedding_size,
+                    patch_size=image_patch_kernel_size,
+                    spatial_dimensions=self.spatial_dimensions,
+                )
+                image_patch_channels = resize_image_patches.out_dim
+            else:
+                resize_image_patches = nn.Identity()
             self.image_patches = nn.Sequential(
                 *[
                     SpaceToDepth(
@@ -489,27 +508,20 @@ class ViTEncoder(nn.Module):
                         spatial_dimensions=self.spatial_dimensions,
                     ),
                     Rearrange(f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"),
-                    nn.RMSNorm(image_patch_channels),
-                    (
-                        ResizeAndPadPatches(
-                            in_channels=in_channels,
-                            d_model=transformer_embedding_size,
-                            patch_size=image_patch_kernel_size,
-                            spatial_dimensions=self.spatial_dimensions,
-                        )
-                        if image_patch_channels > transformer_embedding_size
-                        else PadTensor(
-                            (0, transformer_embedding_size - image_patch_channels)
-                        )
-                    ),
+                    resize_image_patches,
+                    PadTensor((0, transformer_embedding_size - image_patch_channels)),
                 ]
             )
         else:
             self.image_patches = None
 
-        self.preprocess = nn.Sequential(
+        if initial_batch_norm:
+            self.initial_batch_norm = batchnormxd(in_channels)
+        else:
+            self.initial_batch_norm = nn.Identity()
+
+        self.cnn_and_pool = nn.Sequential(
             *[
-                batchnormxd(in_channels) if initial_batch_norm else nn.Identity(),
                 self.cnn,
                 self.activate_and_dropout,
                 self.pool,
@@ -517,47 +529,31 @@ class ViTEncoder(nn.Module):
                     f"N C {spatial_dim_names} -> N ({spatial_dim_names}) C"
                 ),
                 self.pooling_channels_padding,
-                nn.RMSNorm(max(transformer_embedding_size, pooling_out_channels)),
             ]
         )
 
         self.reset_parameters()
 
     def embed(self, x):
-        preprocessed = self.preprocess(x)
+        x = self.initial_batch_norm(x)
+        embedded = self.cnn_and_pool(x)
 
         if self.initial_ff is not None:
-            branch = self.initial_ff(preprocessed)
-            residual = (
-                self.size_residual(preprocessed)
-                if self.initial_ff_residual_path
-                else None
-            )
-        else:
-            branch = None
-            residual = preprocessed
+            embedded = self.initial_ff(embedded)
 
         if self.image_patches is not None:
-            image_patches = self.image_patches(x)
-            residual = image_patches if residual is None else residual + image_patches
+            embedded = self.alpha * self.image_patches(x) + self.beta * embedded
 
-        if branch is None:
-            return residual
-        elif residual is None:
-            return self.norm(branch) if self.transformer_post_norm else branch
-        elif self.transformer_post_norm:
-            return self.norm(self.alpha * residual + self.beta * branch)
-        else:
-            return residual + branch
+        return embedded
 
     def forward(self, x):
-        return self.transformer(self.embed(x))
+        return self.transformer(self.stem_output_norm(self.embed(x)))
 
     def attention_logits(self, x):
         return self.transformer.attention_logits(self.embed(x))
 
     def reset_parameters(self):
-        for module in self.preprocess:
+        for module in self.cnn_and_pool:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
         if self.initial_ff is not None:
@@ -601,12 +597,13 @@ class ViT(nn.Module):
         pooling_padding=1,
         images_in_stream=False,
         transformer_feedforward_first=True,
-        transformer_initial_ff_residual_path=True,
         transformer_initial_ff_linear_module_up=None,
         transformer_initial_ff_linear_module_down=None,
         transformer_initial_ff_dropout=None,
         transformer_initial_ff_inner_dropout=None,
         transformer_initial_ff_outer_dropout=None,
+        transformer_initial_ff_activation: Optional[nn.Module] = None,
+        transformer_initial_ff_activation_kwargs: Optional[dict] = None,
         transformer_pre_norm=True,
         transformer_post_norm=False,
         transformer_absolute_position_embedding=False,
@@ -642,20 +639,15 @@ class ViT(nn.Module):
         super().__init__()
 
         if isinstance(cnn_activation, str):
-            cnn_activation = {
-                "ReLU": ReLU,
-                "SquaredReLU": SquaredReLU,
-                "GELU": GELU,
-                "SwiGLU": SwiGLU,
-            }[cnn_activation]
+            cnn_activation = ACTIVATIONS[cnn_activation]
 
         if isinstance(transformer_activation, str):
-            transformer_activation = {
-                "ReLU": ReLU,
-                "SquaredReLU": SquaredReLU,
-                "GELU": GELU,
-                "SwiGLU": SwiGLU,
-            }[transformer_activation]
+            transformer_activation = ACTIVATIONS[transformer_activation]
+
+        if isinstance(transformer_initial_ff_activation, str):
+            transformer_initial_ff_activation = ACTIVATIONS[
+                transformer_initial_ff_activation
+            ]
 
         self.alpha = alpha
         self.beta = beta
@@ -682,12 +674,13 @@ class ViT(nn.Module):
             pooling_padding=pooling_padding,
             images_in_stream=images_in_stream,
             transformer_feedforward_first=transformer_feedforward_first,
-            transformer_initial_ff_residual_path=transformer_initial_ff_residual_path,
             transformer_initial_ff_linear_module_up=transformer_initial_ff_linear_module_up,
             transformer_initial_ff_linear_module_down=transformer_initial_ff_linear_module_down,
             transformer_initial_ff_dropout=transformer_initial_ff_dropout,
             transformer_initial_ff_inner_dropout=transformer_initial_ff_inner_dropout,
             transformer_initial_ff_outer_dropout=transformer_initial_ff_outer_dropout,
+            transformer_initial_ff_activation=transformer_initial_ff_activation,
+            transformer_initial_ff_activation_kwargs=transformer_initial_ff_activation_kwargs,
             transformer_pre_norm=transformer_pre_norm,
             transformer_post_norm=transformer_post_norm,
             transformer_absolute_position_embedding=transformer_absolute_position_embedding,
