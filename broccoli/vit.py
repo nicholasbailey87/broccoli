@@ -550,9 +550,11 @@ class ViTEncoder(nn.Module):
         return self.transformer(self.stem_output_norm(self.embed(x)))
 
     def attention_logits(self, x):
-        return self.transformer.attention_logits(self.embed(x))
+        return self.transformer.attention_logits(self.stem_output_norm(self.embed(x)))
 
     def reset_parameters(self):
+        if hasattr(self.initial_batch_norm, "reset_parameters"):
+            self.initial_batch_norm.reset_parameters()
         for module in self.cnn_and_pool:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
@@ -562,6 +564,7 @@ class ViTEncoder(nn.Module):
             for module in self.image_patches:
                 if hasattr(module, "reset_parameters"):
                     module.reset_parameters()
+        self.stem_output_norm.reset_parameters()
         self.transformer.reset_parameters()
 
 
