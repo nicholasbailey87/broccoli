@@ -239,12 +239,13 @@ class ViTEncoder(nn.Module):
                 should get positional embedding if rotary_embedding is not None.
                 Enforces positional_heads <= n_heads. If positional_heads is an int,
                 that many heads will have positional embedding. Otherwise,
-                floor(positional_heads * n_heads) will have positional embedding.
-            images_in_stream: if True, the raw image is cut into patches (with the
-                pooling kernel/stride/padding, or the CNN's if there is no
-                pooling, or one pixel per token if there is neither), RMSNormed,
-                resized/padded to the embedding size and added to the residual
-                stream, whatever the initial FF is doing. Raises if the patches
+                ceil(positional_heads * n_heads) will have positional embedding.
+            images_in_stream: if True, the image (after the initial batch norm, if
+                any) is cut into patches (with the pooling kernel/stride/padding,
+                or the CNN's if there is no pooling, or one pixel per token if
+                there is neither), resized if they don't fit in the embedding
+                size, zero-padded up to it and added to the residual stream,
+                whatever the initial FF is doing. Raises if the patches
                 don't land on the same token grid as the stem.
         """
 
@@ -299,6 +300,9 @@ class ViTEncoder(nn.Module):
                 padding_mode="zeros",
             )
             cnn_activation_out_channels = cnn_out_channels
+            # Named, so that its parameters say "norm" and stay out of weight
+            # decay (inside the Sequential they would be named by index)
+            self.cnn_batch_norm = batchnormxd(cnn_activation_out_channels)
             self.activate_and_dropout = nn.Sequential(
                 *[
                     Rearrange(  # rearrange in case we're using XGLU activation
@@ -307,7 +311,7 @@ class ViTEncoder(nn.Module):
                     self.cnn_activation,
                     Rearrange(f"N {spatial_dim_names} C -> N C {spatial_dim_names}"),
                     nn.Dropout(cnn_dropout),
-                    batchnormxd(cnn_activation_out_channels),
+                    self.cnn_batch_norm,
                 ]
             )
         else:
@@ -364,9 +368,16 @@ class ViTEncoder(nn.Module):
                 "Pooling type must be max, average, concat or None"
             )
 
-        self.pooling_channels_padding = PadTensor(
-            (0, max(0, transformer_embedding_size - pooling_out_channels))
-        )
+        # An FF stem takes the pooled channels as they are (padding them would
+        # only add dead weights to its first linear, and make muP think its
+        # fan-in grows with width); otherwise they go straight into the stream,
+        # so pad them up to the embedding size
+        if transformer_feedforward_first:
+            self.pooling_channels_padding = nn.Identity()
+        else:
+            self.pooling_channels_padding = PadTensor(
+                (0, max(0, transformer_embedding_size - pooling_out_channels))
+            )
 
         self.sequence_length = math.prod(pooling_output_size)  # One token per voxel
 
@@ -408,7 +419,7 @@ class ViTEncoder(nn.Module):
 
         if transformer_feedforward_first:
             self.initial_ff = FeedforwardBlock(
-                max(transformer_embedding_size, pooling_out_channels),
+                pooling_out_channels,
                 transformer_embedding_size,
                 ratio=transformer_ff_ratio,
                 inner_size=transformer_ff_inner_size,
@@ -575,7 +586,7 @@ class ViT(nn.Module):
             should get positional embedding if rotary_embedding is not None.
             Enforces positional_heads <= n_heads. If positional_heads is an int,
             that many heads will have positional embedding. Otherwise,
-            floor(positional_heads * n_heads) will have positional embedding.
+            ceil(positional_heads * n_heads) will have positional embedding.
     """
 
     def __init__(
@@ -745,7 +756,7 @@ class ViT(nn.Module):
         all_attention = self.attention_logits(x)
         batch_averages = torch.mean(all_attention, dim=0, keepdim=False)
         sequence_averages = torch.mean(batch_averages, dim=-1, keepdim=False)
-        n_bos_tokens = self.encoder.encoder[-1]._bos_tokens
+        n_bos_tokens = self.encoder.transformer._bos_tokens
         return sequence_averages[:, :, :n_bos_tokens]  # (layer, head, bos_tokens)
 
     def reset_parameters(self):

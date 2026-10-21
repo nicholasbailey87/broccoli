@@ -98,7 +98,7 @@ class MHAttention(nn.Module):
                 get positional embedding if rotary_embedding is not None. Enforces
                 positional_heads <= n_heads. If positional_heads is an int, that
                 many heads will have positional embedding. Otherwise,
-                floor(positional_heads * n_heads) will have positional embedding.
+                ceil(positional_heads * n_heads) will have positional embedding.
         """
         super().__init__()
 
@@ -454,13 +454,16 @@ class FeedforwardBlock(nn.Module):
             f"linear_out{self.linear_suffix}",
             linear_module_down(self.inner_size, output_features),
         )
+        # Named attributes, so that parameter names say "norm" and the norms
+        # are kept out of weight decay (a Sequential would name them by index)
+        self.inner_norm = nn.RMSNorm(self.inner_size)
         self.out_norm = nn.RMSNorm(output_features)
 
         self.process = nn.Sequential(
             *[
                 self.linear_in,
                 self.activation,
-                nn.RMSNorm(self.inner_size),
+                self.inner_norm,
                 self.inner_dropout,
                 self.linear_out,
                 self.out_norm,
@@ -871,7 +874,7 @@ class TransformerEncoder(nn.Module):
                     0
                 )  # to shape (1, seq_len) to broadcast over batch
             )
-            x += position_embedding
+            x = x + position_embedding
 
         return x
 
