@@ -55,6 +55,14 @@ class ResizePatches(nn.Module):
 
         x_spatial = x.reshape(N * S, self.in_channels, *self.patch_size)
 
-        x_down = F.interpolate(x_spatial, size=self.out_size, mode=self.mode)
+        # Without antialiasing each output reads only its 2x2 (2x2x2) nearest
+        # inputs, so a large downscale skips pixels: 32x32 -> 13x13 ignores a
+        # third of the patch. PyTorch only antialiases (bi)linear in 2D.
+        x_down = F.interpolate(
+            x_spatial,
+            size=self.out_size,
+            mode=self.mode,
+            antialias=self.mode == "bilinear",
+        )
 
         return x_down.view(N, S, self.out_dim)
