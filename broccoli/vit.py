@@ -569,6 +569,8 @@ class ViTEncoder(nn.Module):
         for module in self.cnn_and_pool:
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
+        if hasattr(self, "cnn_batch_norm"):
+            self.cnn_batch_norm.reset_parameters()
         if self.initial_ff is not None:
             self.initial_ff.reset_parameters()
         if self.image_patches is not None:
