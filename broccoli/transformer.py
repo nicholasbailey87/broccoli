@@ -852,6 +852,10 @@ class TransformerEncoder(nn.Module):
             ]
         )
 
+        # A pre-norm Transformer never normalises its residual stream, so it
+        # ends with a norm after the last block; post-norm has already normed
+        self.final_norm = nn.RMSNorm(d_model) if pre_norm else None
+
         self.reset_parameters()
 
     @property
@@ -885,6 +889,9 @@ class TransformerEncoder(nn.Module):
         for block in self.blocks:
             x = checkpoint(block, x, use_reentrant=False)
 
+        if self.final_norm is not None:
+            x = self.final_norm(x)
+
         if self._bos_tokens and not self.return_bos_tokens:
             return x[:, self._bos_tokens :, :]
         else:
@@ -913,3 +920,6 @@ class TransformerEncoder(nn.Module):
 
         for block in self.blocks:
             block.reset_parameters()
+
+        if self.final_norm is not None:
+            self.final_norm.reset_parameters()
